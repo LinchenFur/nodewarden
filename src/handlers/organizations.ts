@@ -1,0 +1,500 @@
+import {
+  type CollectionMembership,
+  type Env,
+  type OrgCollection,
+  type Organization,
+  type OrganizationMembership,
+} from '../types';
+import { StorageService } from '../services/storage';
+import { jsonResponse, errorResponse } from '../utils/response';
+import { generateUUID } from '../utils/uuid';
+import { notifyUserVaultSync } from '../durable/notifications-hub';
+import { readActingDeviceIdentifier } from '../utils/device';
+import {
+  getAccessibleCiphersForUser,
+  buildCollectionDetails,
+  buildOrganizationMemberDetails,
+  buildProfileOrganizations,
+  loadOrganizationAccessSnapshot,
+  resolveCipherAccess,
+} from '../utils/organization-access';
+import {
+  hasFullOrganizationAccess,
+  isMembershipAtLeast,
+  membershipTypeToResponse,
+  normalizeOrganizationMembershipType,
+} from '../utils/organization-permissions';
+import { cipherToResponse } from './ciphers';
+
+function getBoolean(value: unknown): boolean {
+  return !!value;
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (value == null) return null;
+  const normalized = String(value).trim();
+  return normalized ? normalized : null;
+}
+
+async function notifyOrganizationUsersSync(
+  request: Request,
+  env: Env,
+  storage: StorageService,
+  organizationId: string
+): Promise<void> {
+  const contextId = readActingDeviceIdentifier(request);
+  const revisions = await storage.updateRevisionDatesForOrganization(organizationId);
+  for (const [userId, revisionDate] of revisions.entries()) {
+    await notifyUserVaultSync(env, userId, revisionDate, contextId);
+  }
+}
+
+async function requireConfirmedMembership(
+  storage: StorageService,
+  userId: string,
+  organizationId: string
+): Promise<OrganizationMembership | null> {
+  const membership = await storage.getOrganizationMembershipByUserAndOrg(userId, organizationId);
+  if (!membership || Number(membership.status) !== 2) {
+    return null;
+  }
+  return membership;
+}
+
+function buildOrganizationResponse(organization: Organization): any {
+  return {
+    id: organization.id,
+    name: organization.name,
+    billingEmail: organization.billingEmail,
+    useTotp: true,
+    usePolicies: true,
+    useGroups: false,
+    useEvents: false,
+    useDirectory: false,
+    useApi: true,
+    useResetPassword: false,
+    useSecretsManager: false,
+    usePasswordManager: true,
+    hasPublicAndPrivateKeys: !!organization.privateKey && !!organization.publicKey,
+    object: 'organization',
+  };
+}
+
+function parseMemberCollectionAssignments(
+  bodyCollections: any[] | null | undefined,
+  membershipId: string,
+  now: string
+): CollectionMembership[] {
+  if (!Array.isArray(bodyCollections)) return [];
+  return bodyCollections
+    .map((entry) => {
+      const collectionId = normalizeOptionalString(entry?.id);
+      if (!collectionId) return null;
+      return {
+        collectionId,
+        membershipId,
+        readOnly: getBoolean(entry?.readOnly),
+        hidePasswords: getBoolean(entry?.hidePasswords),
+        manage: getBoolean(entry?.manage),
+        createdAt: now,
+        updatedAt: now,
+      } satisfies CollectionMembership;
+    })
+    .filter(Boolean) as CollectionMembership[];
+}
+
+export async function handleGetOrganizations(request: Request, env: Env, userId: string): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const organizations = await buildProfileOrganizations(storage, userId);
+  return jsonResponse({
+    data: organizations,
+    object: 'list',
+    continuationToken: null,
+  });
+}
+
+export async function handleCreateOrganization(request: Request, env: Env, userId: string): Promise<Response> {
+  const storage = new StorageService(env.DB);
+  const user = await storage.getUserById(userId);
+  if (!user) return errorResponse('User not found', 404);
+
+  let body: {
+    name?: string;
+    billingEmail?: string;
+    collectionName?: string;
+    key?: string;
+    keys?: {
+      encryptedPrivateKey?: string;
+      publicKey?: string;
+    };
+  };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const name = normalizeOptionalString(body.name);
+  if (!name) {
+    return errorResponse('Organization name is required', 400);
+  }
+
+  const now = new Date().toISOString();
+  const organization: Organization = {
+    id: generateUUID(),
+    name,
+    billingEmail: normalizeOptionalString(body.billingEmail) ?? user.email,
+    privateKey: normalizeOptionalString(body.keys?.encryptedPrivateKey),
+    publicKey: normalizeOptionalString(body.keys?.publicKey),
+    createdAt: now,
+    updatedAt: now,
+  };
+  const membership: OrganizationMembership = {
+    id: generateUUID(),
+    organizationId: organization.id,
+    userId,
+    userEmail: user.email,
+    key: normalizeOptionalString(body.key),
+    status: 2,
+    type: 0,
+    accessAll: true,
+    externalId: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const collection: OrgCollection = {
+    id: generateUUID(),
+    organizationId: organization.id,
+    name: normalizeOptionalString(body.collectionName) ?? 'Default',
+    externalId: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await storage.saveOrganization(organization);
+  await storage.saveOrganizationMembership(membership);
+  await storage.saveOrgCollection(collection);
+  await notifyOrganizationUsersSync(request, env, storage, organization.id);
+
+  return jsonResponse(buildOrganizationResponse(organization), 200);
+}
+
+export async function handleGetOrganization(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+  const organization = await storage.getOrganization(organizationId);
+  if (!organization) return errorResponse('Organization not found', 404);
+  return jsonResponse(buildOrganizationResponse(organization));
+}
+
+export async function handleGetCollections(request: Request, env: Env, userId: string): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const collections = await storage.getCollectionsByUser(userId);
+  return jsonResponse({
+    data: collections.map((collection) => ({
+      id: collection.id,
+      organizationId: collection.organizationId,
+      externalId: collection.externalId,
+      name: collection.name,
+      object: 'collection',
+    })),
+    object: 'list',
+    continuationToken: null,
+  });
+}
+
+export async function handleGetOrganizationCollections(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+  if (!hasFullOrganizationAccess(membership)) {
+    return errorResponse('Resource not found.', 404);
+  }
+
+  const collections = await storage.getCollectionsByOrganization(organizationId);
+  return jsonResponse({
+    data: collections.map((collection) => ({
+      id: collection.id,
+      organizationId: collection.organizationId,
+      externalId: collection.externalId,
+      name: collection.name,
+      object: 'collection',
+    })),
+    object: 'list',
+    continuationToken: null,
+  });
+}
+
+export async function handleGetOrganizationCollectionsDetails(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+
+  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
+  const collections = await storage.getCollectionsByOrganization(organizationId);
+  const assignmentsByCollectionId = await storage.getCollectionMembershipsByCollectionIds(collections.map((collection) => collection.id));
+  const membershipsByOrg = await storage.getOrganizationMembershipsByOrg(organizationId);
+
+  const details = [];
+  for (const collection of collections) {
+    const base = await buildCollectionDetails(storage, userId, collection, snapshot);
+    const assigned = hasFullOrganizationAccess(membership)
+      || (snapshot.assignmentsByMembershipId.get(membership.id) || []).some((assignment) => assignment.collectionId === collection.id);
+    if (!assigned) continue;
+
+    const users = [];
+    for (const member of membershipsByOrg) {
+      if (Number(member.status) !== 2) continue;
+      if (hasFullOrganizationAccess(member)) {
+        users.push({
+          id: member.id,
+          readOnly: false,
+          hidePasswords: false,
+          manage: true,
+        });
+        continue;
+      }
+      const assignment = (assignmentsByCollectionId.get(collection.id) || []).find((entry) => entry.membershipId === member.id);
+      if (!assignment) continue;
+      users.push({
+        id: member.id,
+        readOnly: assignment.readOnly,
+        hidePasswords: assignment.hidePasswords,
+        manage: assignment.manage || membershipTypeToResponse(member.type, member.accessAll) === 4,
+      });
+    }
+
+    details.push({
+      ...base,
+      assigned: true,
+      users,
+      groups: [],
+      unmanaged: false,
+      object: 'collectionAccessDetails',
+    });
+  }
+
+  return jsonResponse({
+    data: details,
+    object: 'list',
+    continuationToken: null,
+  });
+}
+
+export async function handleCreateOrganizationCollection(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+  if (!hasFullOrganizationAccess(membership) && !(normalizeOrganizationMembershipType(membership.type) === 3 && membership.accessAll)) {
+    return errorResponse("You don't have permission to create collections", 403);
+  }
+
+  let body: {
+    name?: string;
+    externalId?: string | null;
+    users?: Array<{ id?: string; readOnly?: boolean; hidePasswords?: boolean; manage?: boolean }>;
+  };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const name = normalizeOptionalString(body.name);
+  if (!name) return errorResponse('Collection name is required', 400);
+
+  const now = new Date().toISOString();
+  const collection: OrgCollection = {
+    id: generateUUID(),
+    organizationId,
+    name,
+    externalId: normalizeOptionalString(body.externalId),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await storage.saveOrgCollection(collection);
+  const memberIds = new Set((await storage.getOrganizationMembershipsByOrg(organizationId)).map((entry) => entry.id));
+  const assignments: CollectionMembership[] = [];
+  for (const userAssignment of body.users || []) {
+    const memberId = normalizeOptionalString(userAssignment?.id);
+    if (!memberId || !memberIds.has(memberId)) continue;
+    assignments.push({
+      collectionId: collection.id,
+      membershipId: memberId,
+      readOnly: getBoolean(userAssignment.readOnly),
+      hidePasswords: getBoolean(userAssignment.hidePasswords),
+      manage: getBoolean(userAssignment.manage),
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  await storage.replaceCollectionMemberships(collection.id, assignments);
+  await notifyOrganizationUsersSync(request, env, storage, organizationId);
+
+  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
+  return jsonResponse(await buildCollectionDetails(storage, userId, collection, snapshot), 200);
+}
+
+export async function handleGetOrganizationMembers(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  void env;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+
+  const url = new URL(request.url);
+  const includeCollections = url.searchParams.get('includeCollections') === 'true';
+  const members = await storage.getOrganizationMembershipsByOrg(organizationId);
+  const data = [];
+  for (const member of members) {
+    data.push(await buildOrganizationMemberDetails(storage, member, includeCollections));
+  }
+
+  return jsonResponse({
+    data,
+    object: 'list',
+    continuationToken: null,
+  });
+}
+
+export async function handleUpdateOrganizationMember(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  memberId: string
+): Promise<Response> {
+  const storage = new StorageService(env.DB);
+  const actor = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!actor) return errorResponse('Organization not found', 404);
+  if (!hasFullOrganizationAccess(actor) || !isMembershipAtLeast(actor.type, 3)) {
+    return errorResponse('Insufficient permissions', 403);
+  }
+
+  const target = await storage.getOrganizationMembershipById(memberId);
+  if (!target || target.organizationId !== organizationId) {
+    return errorResponse("The specified user isn't member of the organization", 404);
+  }
+
+  let body: {
+    type?: number | string;
+    accessAll?: boolean;
+    permissions?: Record<string, boolean>;
+    collections?: Array<{ id?: string; readOnly?: boolean; hidePasswords?: boolean; manage?: boolean }>;
+  };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const requestedType = normalizeOrganizationMembershipType(body.type);
+  const explicitAccessAll = typeof body.accessAll === 'boolean' ? body.accessAll : null;
+  const customAccessAll =
+    String(body.type) === '4' &&
+    body.permissions?.createNewCollections === true &&
+    body.permissions?.editAnyCollection === true &&
+    body.permissions?.deleteAnyCollection === true;
+  const nextAccessAll = explicitAccessAll ?? (requestedType <= 1 || customAccessAll);
+
+  if ((isMembershipAtLeast(target.type, 1) || requestedType <= 1) && normalizeOrganizationMembershipType(actor.type) !== 0) {
+    return errorResponse('Only Owners can grant and remove Admin or Owner privileges', 403);
+  }
+
+  if (normalizeOrganizationMembershipType(target.type) === 0 && normalizeOrganizationMembershipType(actor.type) !== 0) {
+    return errorResponse('Only Owners can edit Owner users', 403);
+  }
+
+  if (normalizeOrganizationMembershipType(target.type) === 0 && requestedType !== 0) {
+    const owners = (await storage.getOrganizationMembershipsByOrg(organizationId)).filter((entry) => Number(entry.status) === 2 && normalizeOrganizationMembershipType(entry.type) === 0);
+    if (owners.length <= 1) {
+      return errorResponse("Can't delete the last owner", 400);
+    }
+  }
+
+  target.type = requestedType;
+  target.accessAll = nextAccessAll;
+  target.updatedAt = new Date().toISOString();
+  await storage.saveOrganizationMembership(target);
+
+  const collectionAssignments = nextAccessAll
+    ? []
+    : parseMemberCollectionAssignments(body.collections, target.id, target.updatedAt);
+  await storage.replaceMembershipCollectionAccess(target.id, collectionAssignments);
+  await notifyOrganizationUsersSync(request, env, storage, organizationId);
+
+  return new Response(null, { status: 200 });
+}
+
+export async function handleGetOrganizationCipherDetails(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+  if (!hasFullOrganizationAccess(membership)) {
+    return errorResponse('Resource not found.', 404);
+  }
+
+  const { ciphers, collectionIdsByCipherId, snapshot } = await getAccessibleCiphersForUser(storage, userId);
+  const orgCiphers = ciphers.filter((cipher) => String((cipher as { organizationId?: unknown }).organizationId || '') === organizationId);
+  const attachments = await storage.getAttachmentsByCipherIds(orgCiphers.map((cipher) => cipher.id));
+
+  const data = [];
+  for (const cipher of orgCiphers) {
+    const access = await resolveCipherAccess(storage, userId, cipher, snapshot, collectionIdsByCipherId);
+    data.push(
+      cipherToResponse(cipher, attachments.get(cipher.id) || [], {
+        organizationId: access.organizationId,
+        collectionIds: access.collectionIds,
+        edit: access.canEdit,
+        viewPassword: access.canViewPassword,
+        permissions: {
+          delete: access.canDelete,
+          restore: access.canRestore,
+        },
+      })
+    );
+  }
+
+  return jsonResponse({
+    data,
+    object: 'list',
+    continuationToken: null,
+  });
+}

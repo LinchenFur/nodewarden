@@ -9,6 +9,12 @@ import {
   buildUserDecryptionCompat,
   buildUserDecryptionOptions,
 } from '../utils/user-decryption';
+import {
+  buildCollectionDetails,
+  buildProfileOrganizations,
+  getAccessibleCiphersForUser,
+  resolveCipherAccess,
+} from '../utils/organization-access';
 
 interface SyncCacheEntry {
   userId: string;
@@ -115,10 +121,11 @@ export async function handleSync(request: Request, env: Env, userId: string): Pr
     });
   }
 
-  const ciphers = await storage.getAllCiphers(userId);
+  const accessible = await getAccessibleCiphersForUser(storage, userId);
   const folders = await storage.getAllFolders(userId);
   const sends = await storage.getAllSends(userId);
-  const attachmentsByCipher = await storage.getAttachmentsByUserId(userId);
+  const attachmentsByCipher = await storage.getAttachmentsByCipherIds(accessible.ciphers.map((cipher) => cipher.id));
+  const collections = await storage.getCollectionsByUser(userId);
 
   // Build profile response
   const profile: ProfileResponse = {
@@ -136,7 +143,7 @@ export async function handleSync(request: Request, env: Env, userId: string): Pr
     privateKey: user.privateKey,
     accountKeys: buildAccountKeys(user),
     securityStamp: user.securityStamp || user.id,
-    organizations: [],
+    organizations: await buildProfileOrganizations(storage, user.id),
     providers: [],
     providerOrganizations: [],
     forcePasswordReset: false,
@@ -148,9 +155,19 @@ export async function handleSync(request: Request, env: Env, userId: string): Pr
 
   // Build cipher responses with attachments
   const cipherResponses: CipherResponse[] = [];
-  for (const cipher of ciphers) {
+  for (const cipher of accessible.ciphers) {
     const attachments = attachmentsByCipher.get(cipher.id) || [];
-    cipherResponses.push(cipherToResponse(cipher, attachments));
+    const access = await resolveCipherAccess(storage, userId, cipher, accessible.snapshot, accessible.collectionIdsByCipherId);
+    cipherResponses.push(cipherToResponse(cipher, attachments, {
+      organizationId: access.organizationId,
+      collectionIds: access.collectionIds,
+      edit: access.canEdit,
+      viewPassword: access.canViewPassword,
+      permissions: {
+        delete: access.canDelete,
+        restore: access.canRestore,
+      },
+    }));
   }
 
   // Build folder responses
@@ -164,7 +181,7 @@ export async function handleSync(request: Request, env: Env, userId: string): Pr
   const syncResponse: SyncResponse = {
     profile: profile,
     folders: folderResponses,
-    collections: [],
+    collections: await Promise.all(collections.map((collection) => buildCollectionDetails(storage, userId, collection, accessible.snapshot))),
     ciphers: cipherResponses,
     domains: excludeDomains
       ? null

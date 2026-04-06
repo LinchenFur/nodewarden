@@ -13,6 +13,7 @@ type UpdateRevisionDate = (userId: string) => Promise<string>;
 interface CipherRow {
   id: string;
   user_id: string;
+  organization_id: string | null;
   type: number | null;
   folder_id: string | null;
   name: string | null;
@@ -36,6 +37,7 @@ function parseCipherRow(row: CipherRow | null | undefined): Cipher | null {
       ...parsed,
       id: row.id,
       userId: row.user_id,
+      organizationId: normalizeOptionalId(row.organization_id ?? parsed.organizationId ?? null),
       type: Number(row.type) || Number(parsed.type) || 1,
       folderId,
       name: row.name ?? parsed.name ?? null,
@@ -55,7 +57,7 @@ function parseCipherRow(row: CipherRow | null | undefined): Cipher | null {
 }
 
 function selectCipherColumns(): string {
-  return 'id, user_id, type, folder_id, name, notes, favorite, data, reprompt, key, created_at, updated_at, archived_at, deleted_at';
+  return 'id, user_id, organization_id, type, folder_id, name, notes, favorite, data, reprompt, key, created_at, updated_at, archived_at, deleted_at';
 }
 
 export async function getCipher(db: D1Database, id: string): Promise<Cipher | null> {
@@ -68,20 +70,23 @@ export async function getCipher(db: D1Database, id: string): Promise<Cipher | nu
 
 export async function saveCipher(db: D1Database, safeBind: SafeBind, cipher: Cipher): Promise<void> {
   const folderId = normalizeOptionalId(cipher.folderId);
+  const organizationId = normalizeOptionalId((cipher as { organizationId?: unknown }).organizationId ?? null);
   const data = JSON.stringify({
     ...cipher,
+    organizationId,
     folderId,
   });
   const stmt = db.prepare(
-    'INSERT INTO ciphers(id, user_id, type, folder_id, name, notes, favorite, data, reprompt, key, created_at, updated_at, archived_at, deleted_at) ' +
-    'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+    'INSERT INTO ciphers(id, user_id, organization_id, type, folder_id, name, notes, favorite, data, reprompt, key, created_at, updated_at, archived_at, deleted_at) ' +
+    'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
     'ON CONFLICT(id) DO UPDATE SET ' +
-    'user_id=excluded.user_id, type=excluded.type, folder_id=excluded.folder_id, name=excluded.name, notes=excluded.notes, favorite=excluded.favorite, data=excluded.data, reprompt=excluded.reprompt, key=excluded.key, updated_at=excluded.updated_at, archived_at=excluded.archived_at, deleted_at=excluded.deleted_at'
+    'user_id=excluded.user_id, organization_id=excluded.organization_id, type=excluded.type, folder_id=excluded.folder_id, name=excluded.name, notes=excluded.notes, favorite=excluded.favorite, data=excluded.data, reprompt=excluded.reprompt, key=excluded.key, updated_at=excluded.updated_at, archived_at=excluded.archived_at, deleted_at=excluded.deleted_at'
   );
   await safeBind(
     stmt,
     cipher.id,
     cipher.userId,
+    organizationId,
     Number(cipher.type) || 1,
     folderId,
     cipher.name,
@@ -197,6 +202,33 @@ export async function getAllCiphers(db: D1Database, userId: string): Promise<Cip
     const cipher = parseCipherRow(row);
     return cipher ? [cipher] : [];
   });
+}
+
+export async function getCiphersByOrganizationIds(
+  db: D1Database,
+  sqlChunkSize: SqlChunkSize,
+  organizationIds: string[]
+): Promise<Cipher[]> {
+  const uniqueIds = sanitizeIds(organizationIds);
+  if (!uniqueIds.length) return [];
+
+  const out: Cipher[] = [];
+  const chunkSize = sqlChunkSize(0);
+  for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+    const chunk = uniqueIds.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(',');
+    const res = await db
+      .prepare(`SELECT ${selectCipherColumns()} FROM ciphers WHERE organization_id IN (${placeholders}) ORDER BY updated_at DESC`)
+      .bind(...chunk)
+      .all<CipherRow>();
+    out.push(
+      ...(res.results || []).flatMap((row) => {
+        const cipher = parseCipherRow(row);
+        return cipher ? [cipher] : [];
+      })
+    );
+  }
+  return out;
 }
 
 export async function getCiphersPage(

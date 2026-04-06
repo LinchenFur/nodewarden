@@ -1,4 +1,4 @@
-import { ArrowUpDown, Cloud, Clock3, Folder as FolderIcon, KeyRound, Lock, LogOut, Send as SendIcon, Settings as SettingsIcon, Shield, ShieldUser } from 'lucide-preact';
+import { ArrowUpDown, Building2, Cloud, Clock3, Folder as FolderIcon, KeyRound, Lock, LogOut, Send as SendIcon, Settings as SettingsIcon, Shield, ShieldUser } from 'lucide-preact';
 import { Link } from 'wouter';
 import AppMainRoutes from '@/components/AppMainRoutes';
 import ThemeSwitch from '@/components/ThemeSwitch';
@@ -81,6 +81,10 @@ export default function AppAuthenticatedShell(props: AppAuthenticatedShellProps)
             <Link href="/sends" className={`side-link ${props.location === '/sends' ? 'active' : ''}`}>
               <SendIcon size={16} />
               <span>{t('nav_sends')}</span>
+            </Link>
+            <Link href="/organizations" className={`side-link ${props.location === '/organizations' ? 'active' : ''}`}>
+              <Building2 size={16} />
+              <span>{t('nav_organizations')}</span>
             </Link>
             {props.profile?.role === 'admin' && (
               <Link href="/admin" className={`side-link ${props.location === '/admin' ? 'active' : ''}`}>

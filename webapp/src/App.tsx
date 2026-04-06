@@ -1045,6 +1045,7 @@ export default function App() {
   const currentPageTitle = (() => {
     if (location === '/vault/totp') return t('txt_verification_code');
     if (location === '/sends') return t('nav_sends');
+    if (location === '/organizations') return t('nav_organizations');
     if (location === '/admin') return t('nav_admin_panel');
     if (location === '/security/devices') return t('nav_device_management');
     if (location === '/backup') return t('nav_backup_strategy');
@@ -1079,6 +1080,7 @@ export default function App() {
   const mainRoutesProps = {
     profile,
     session,
+    authedFetch,
     mobileLayout,
     importRoute: IMPORT_ROUTE,
     settingsHomeRoute: SETTINGS_HOME_ROUTE,

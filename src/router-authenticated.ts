@@ -55,6 +55,18 @@ import {
 import { handleSync } from './handlers/sync';
 import { handleCiphersImport } from './handlers/import';
 import {
+  handleCreateOrganization,
+  handleGetCollections,
+  handleGetOrganization,
+  handleGetOrganizationCipherDetails,
+  handleGetOrganizationCollections,
+  handleGetOrganizationCollectionsDetails,
+  handleGetOrganizationMembers,
+  handleGetOrganizations,
+  handleUpdateOrganizationMember,
+  handleCreateOrganizationCollection,
+} from './handlers/organizations';
+import {
   handleCreateAttachment,
   handleUploadAttachment,
   handleGetAttachment,
@@ -135,6 +147,12 @@ export async function handleAuthenticatedRoute(
 
   if (path === '/api/ciphers/import' && method === 'POST') {
     return handleCiphersImport(request, env, userId);
+  }
+
+  if (path === '/api/ciphers/organization-details' && method === 'GET') {
+    const organizationId = new URL(request.url).searchParams.get('organizationId') || '';
+    if (!organizationId) return errorResponse('organizationId is required', 400);
+    return handleGetOrganizationCipherDetails(request, env, userId, organizationId);
   }
 
   if (path === '/api/ciphers/delete' && method === 'POST') {
@@ -220,15 +238,40 @@ export async function handleAuthenticatedRoute(
   }
 
   if (path === '/api/collections' || path.startsWith('/api/collections/')) {
-    if (method === 'GET') {
-      return jsonResponse({ data: [], object: 'list', continuationToken: null });
-    }
+    if (path === '/api/collections' && method === 'GET') return handleGetCollections(request, env, userId);
     return null;
   }
 
-  if (path === '/api/organizations' || path.startsWith('/api/organizations/')) {
-    if (method === 'GET') {
-      return jsonResponse({ data: [], object: 'list', continuationToken: null });
+  if (path === '/api/organizations') {
+    if (method === 'GET') return handleGetOrganizations(request, env, userId);
+    if (method === 'POST') return handleCreateOrganization(request, env, userId);
+    return null;
+  }
+
+  const organizationMatch = path.match(/^\/api\/organizations\/([a-f0-9-]+)(\/.*)?$/i);
+  if (organizationMatch) {
+    const organizationId = organizationMatch[1];
+    const subPath = organizationMatch[2] || '';
+
+    if ((subPath === '' || subPath === '/') && method === 'GET') {
+      return handleGetOrganization(request, env, userId, organizationId);
+    }
+    if (subPath === '/collections' && method === 'GET') {
+      return handleGetOrganizationCollections(request, env, userId, organizationId);
+    }
+    if (subPath === '/collections' && method === 'POST') {
+      return handleCreateOrganizationCollection(request, env, userId, organizationId);
+    }
+    if (subPath === '/collections/details' && method === 'GET') {
+      return handleGetOrganizationCollectionsDetails(request, env, userId, organizationId);
+    }
+    if (subPath === '/users' && method === 'GET') {
+      return handleGetOrganizationMembers(request, env, userId, organizationId);
+    }
+
+    const memberMatch = subPath.match(/^\/users\/([a-f0-9-]+)$/i);
+    if (memberMatch && (method === 'PUT' || method === 'POST')) {
+      return handleUpdateOrganizationMember(request, env, userId, organizationId, memberMatch[1]);
     }
     return null;
   }

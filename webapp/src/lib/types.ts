@@ -17,7 +17,56 @@ export interface Profile {
   privateKey?: string | null;
   publicKey?: string | null;
   role: 'admin' | 'user';
+  organizations?: OrganizationSummary[];
   [k: string]: unknown;
+}
+
+export interface OrganizationSummary {
+  id: string;
+  name: string;
+  billingEmail?: string | null;
+  object?: string;
+}
+
+export interface OrganizationCollection {
+  id: string;
+  organizationId: string;
+  name: string;
+  externalId?: string | null;
+  readOnly?: boolean;
+  hidePasswords?: boolean;
+  manage?: boolean;
+  object?: string;
+}
+
+export interface OrganizationCollectionAccessDetail extends OrganizationCollection {
+  assigned?: boolean;
+  users?: Array<{
+    id: string;
+    readOnly: boolean;
+    hidePasswords: boolean;
+    manage: boolean;
+  }>;
+}
+
+export interface OrganizationMemberCollectionAccess {
+  id: string;
+  readOnly: boolean;
+  hidePasswords: boolean;
+  manage: boolean;
+}
+
+export interface OrganizationMember {
+  id: string;
+  userId: string;
+  name?: string | null;
+  email: string;
+  status: number;
+  type: number;
+  accessAll: boolean;
+  collections?: OrganizationMemberCollectionAccess[];
+  permissions?: Record<string, boolean> | null;
+  object?: string;
 }
 
 export interface Folder {

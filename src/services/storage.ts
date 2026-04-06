@@ -1,4 +1,20 @@
-import { User, Cipher, Folder, Attachment, Device, Invite, AuditLog, Send, TrustedDeviceTokenSummary, RefreshTokenRecord } from '../types';
+import {
+  User,
+  Cipher,
+  Folder,
+  Attachment,
+  Device,
+  Invite,
+  AuditLog,
+  Send,
+  TrustedDeviceTokenSummary,
+  RefreshTokenRecord,
+  Organization,
+  OrganizationMembership,
+  OrgCollection,
+  CollectionMembership,
+  CollectionCipher,
+} from '../types';
 import { LIMITS } from '../config/limits';
 import { ensureStorageSchema } from './storage-schema';
 import {
@@ -45,10 +61,33 @@ import {
   getAllCiphers as listStoredCiphers,
   getCipher as findStoredCipher,
   getCiphersByIds as listStoredCiphersByIds,
+  getCiphersByOrganizationIds as listStoredCiphersByOrganizationIds,
   getCiphersPage as listStoredCiphersPage,
   saveCipher as saveStoredCipher,
   deleteCipher as deleteStoredCipher,
 } from './storage-cipher-repo';
+import {
+  getOrganization as findStoredOrganization,
+  saveOrganization as saveStoredOrganization,
+  getOrganizationsByUser as listStoredOrganizationsByUser,
+  getOrganizationMembershipById as findStoredOrganizationMembershipById,
+  getOrganizationMembershipByUserAndOrg as findStoredOrganizationMembershipByUserAndOrg,
+  getOrganizationMembershipsByUser as listStoredOrganizationMembershipsByUser,
+  getOrganizationMembershipsByOrg as listStoredOrganizationMembershipsByOrg,
+  getConfirmedOrganizationMemberUserIds as listStoredConfirmedOrganizationMemberUserIds,
+  saveOrganizationMembership as saveStoredOrganizationMembership,
+  getOrgCollection as findStoredOrgCollection,
+  saveOrgCollection as saveStoredOrgCollection,
+  getCollectionsByOrganization as listStoredCollectionsByOrganization,
+  getCollectionsByUser as listStoredCollectionsByUser,
+  getCollectionMembershipsByMembershipIds as listStoredCollectionMembershipsByMembershipIds,
+  getCollectionMembershipsByCollectionIds as listStoredCollectionMembershipsByCollectionIds,
+  replaceCollectionMemberships as replaceStoredCollectionMemberships,
+  replaceMembershipCollectionAccess as replaceStoredMembershipCollectionAccess,
+  getCollectionIdsByCipherIds as listStoredCollectionIdsByCipherIds,
+  getCollectionCiphersByCollectionIds as listStoredCollectionCiphersByCollectionIds,
+  replaceCipherCollections as replaceStoredCipherCollections,
+} from './storage-org-repo';
 import {
   addAttachmentToCipher as attachStoredAttachmentToCipher,
   deleteAllAttachmentsByCipher as deleteStoredAttachmentsByCipher,
@@ -106,7 +145,7 @@ import {
 
 const TWO_FACTOR_REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const STORAGE_SCHEMA_VERSION_KEY = 'schema.version';
-const STORAGE_SCHEMA_VERSION = '2026-03-30.1';
+const STORAGE_SCHEMA_VERSION = '2026-04-06.1';
 
 // D1-backed storage.
 // Contract:
@@ -306,6 +345,10 @@ export class StorageService {
     return listStoredCiphers(this.db, userId);
   }
 
+  async getCiphersByOrganizationIds(organizationIds: string[]): Promise<Cipher[]> {
+    return listStoredCiphersByOrganizationIds(this.db, this.sqlChunkSize.bind(this), organizationIds);
+  }
+
   async getCiphersPage(userId: string, includeDeleted: boolean, limit: number, offset: number): Promise<Cipher[]> {
     return listStoredCiphersPage(this.db, userId, includeDeleted, limit, offset);
   }
@@ -355,6 +398,88 @@ export class StorageService {
 
   async getFoldersPage(userId: string, limit: number, offset: number): Promise<Folder[]> {
     return listStoredFoldersPage(this.db, userId, limit, offset);
+  }
+
+  // --- Organizations / collections ---
+
+  async getOrganization(id: string): Promise<Organization | null> {
+    return findStoredOrganization(this.db, id);
+  }
+
+  async saveOrganization(organization: Organization): Promise<void> {
+    await saveStoredOrganization(this.db, organization);
+  }
+
+  async getOrganizationsByUser(userId: string): Promise<Organization[]> {
+    return listStoredOrganizationsByUser(this.db, userId);
+  }
+
+  async getOrganizationMembershipById(id: string): Promise<OrganizationMembership | null> {
+    return findStoredOrganizationMembershipById(this.db, id);
+  }
+
+  async getOrganizationMembershipByUserAndOrg(userId: string, organizationId: string): Promise<OrganizationMembership | null> {
+    return findStoredOrganizationMembershipByUserAndOrg(this.db, userId, organizationId);
+  }
+
+  async getOrganizationMembershipsByUser(userId: string, confirmedOnly: boolean = false): Promise<OrganizationMembership[]> {
+    return listStoredOrganizationMembershipsByUser(this.db, userId, confirmedOnly);
+  }
+
+  async getOrganizationMembershipsByOrg(organizationId: string): Promise<OrganizationMembership[]> {
+    return listStoredOrganizationMembershipsByOrg(this.db, organizationId);
+  }
+
+  async getConfirmedOrganizationMemberUserIds(organizationId: string): Promise<string[]> {
+    return listStoredConfirmedOrganizationMemberUserIds(this.db, organizationId);
+  }
+
+  async saveOrganizationMembership(membership: OrganizationMembership): Promise<void> {
+    await saveStoredOrganizationMembership(this.db, membership);
+  }
+
+  async getOrgCollection(id: string): Promise<OrgCollection | null> {
+    return findStoredOrgCollection(this.db, id);
+  }
+
+  async saveOrgCollection(collection: OrgCollection): Promise<void> {
+    await saveStoredOrgCollection(this.db, collection);
+  }
+
+  async getCollectionsByOrganization(organizationId: string): Promise<OrgCollection[]> {
+    return listStoredCollectionsByOrganization(this.db, organizationId);
+  }
+
+  async getCollectionsByUser(userId: string): Promise<OrgCollection[]> {
+    return listStoredCollectionsByUser(this.db, userId);
+  }
+
+  async getCollectionMembershipsByMembershipIds(membershipIds: string[]): Promise<Map<string, CollectionMembership[]>> {
+    return listStoredCollectionMembershipsByMembershipIds(this.db, membershipIds, this.sqlChunkSize.bind(this));
+  }
+
+  async getCollectionMembershipsByCollectionIds(collectionIds: string[]): Promise<Map<string, CollectionMembership[]>> {
+    return listStoredCollectionMembershipsByCollectionIds(this.db, collectionIds, this.sqlChunkSize.bind(this));
+  }
+
+  async replaceCollectionMemberships(collectionId: string, assignments: CollectionMembership[]): Promise<void> {
+    await replaceStoredCollectionMemberships(this.db, collectionId, assignments);
+  }
+
+  async replaceMembershipCollectionAccess(membershipId: string, assignments: CollectionMembership[]): Promise<void> {
+    await replaceStoredMembershipCollectionAccess(this.db, membershipId, assignments);
+  }
+
+  async getCollectionIdsByCipherIds(cipherIds: string[]): Promise<Map<string, string[]>> {
+    return listStoredCollectionIdsByCipherIds(this.db, cipherIds, this.sqlChunkSize.bind(this));
+  }
+
+  async getCollectionCiphersByCollectionIds(collectionIds: string[]): Promise<Map<string, CollectionCipher[]>> {
+    return listStoredCollectionCiphersByCollectionIds(this.db, collectionIds, this.sqlChunkSize.bind(this));
+  }
+
+  async replaceCipherCollections(cipherId: string, collectionIds: string[]): Promise<void> {
+    await replaceStoredCipherCollections(this.db, cipherId, collectionIds);
   }
 
   // --- Attachments ---
@@ -598,6 +723,15 @@ export class StorageService {
 
   async updateRevisionDate(userId: string): Promise<string> {
     return updateStoredRevisionDate(this.db, userId);
+  }
+
+  async updateRevisionDatesForOrganization(organizationId: string): Promise<Map<string, string>> {
+    const revisions = new Map<string, string>();
+    const userIds = await this.getConfirmedOrganizationMemberUserIds(organizationId);
+    for (const userId of userIds) {
+      revisions.set(userId, await this.updateRevisionDate(userId));
+    }
+    return revisions;
   }
 
   // --- One-time attachment download tokens ---

@@ -8,6 +8,7 @@ import { LIMITS } from '../config/limits';
 import { isTotpEnabled, verifyTotpToken } from '../utils/totp';
 import { createRecoveryCode, recoveryCodeEquals } from '../utils/recovery-code';
 import { buildAccountKeys } from '../utils/user-decryption';
+import { buildProfileOrganizations } from '../utils/organization-access';
 
 function looksLikeEncString(value: string): boolean {
   if (!value) return false;
@@ -85,8 +86,7 @@ async function verifyUserSecret(
   return auth.verifyPassword(normalized, user.masterPasswordHash, user.email);
 }
 
-function toProfile(user: User, env: Env): ProfileResponse {
-  void env;
+async function toProfile(user: User, env: Env, storage: StorageService): Promise<ProfileResponse> {
   return {
     id: user.id,
     name: user.name,
@@ -102,7 +102,7 @@ function toProfile(user: User, env: Env): ProfileResponse {
     privateKey: user.privateKey,
     accountKeys: buildAccountKeys(user),
     securityStamp: user.securityStamp || user.id,
-    organizations: [],
+    organizations: await buildProfileOrganizations(storage, user.id),
     providers: [],
     providerOrganizations: [],
     forcePasswordReset: false,
@@ -345,7 +345,7 @@ export async function handleGetProfile(request: Request, env: Env, userId: strin
   const storage = new StorageService(env.DB);
   const user = await storage.getUserById(userId);
   if (!user) return errorResponse('User not found', 404);
-  return jsonResponse(toProfile(user, env));
+  return jsonResponse(await toProfile(user, env, storage));
 }
 
 // PUT /api/accounts/profile
@@ -372,7 +372,7 @@ export async function handleUpdateProfile(request: Request, env: Env, userId: st
   user.updatedAt = new Date().toISOString();
   await storage.saveUser(user);
 
-  return jsonResponse(toProfile(user, env));
+  return jsonResponse(await toProfile(user, env, storage));
 }
 
 // PUT/POST /api/accounts/verify-devices
