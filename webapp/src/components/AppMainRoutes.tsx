@@ -1,15 +1,13 @@
 import { lazy, Suspense } from 'preact/compat';
 import { useEffect } from 'preact/hooks';
 import { Link, Route, Switch } from 'wouter';
-import { ArrowUpDown, Building2, Cloud, LogOut, Settings as SettingsIcon, Shield, ShieldUser } from 'lucide-preact';
+import { ArrowUpDown, Cloud, LogOut, Settings as SettingsIcon, Shield, ShieldUser } from 'lucide-preact';
 import type { ImportAttachmentFile, ImportResultSummary } from '@/components/ImportPage';
 import type { AdminBackupImportResponse, AdminBackupRunResponse, AdminBackupSettings, RemoteBackupBrowserResponse } from '@/lib/api/backup';
-import type { AuthedFetch } from '@/lib/api/shared';
 import type { CiphersImportPayload } from '@/lib/api/vault';
 import { t } from '@/lib/i18n';
 import type { AdminInvite, AdminUser, AuthorizedDevice, Cipher, Folder as VaultFolder, Profile, Send, SendDraft, SessionState, VaultDraft } from '@/lib/types';
 import type { ExportRequest } from '@/lib/export-formats';
-import RouteErrorBoundary from '@/components/RouteErrorBoundary';
 
 const SendsPage = lazy(() => import('@/components/SendsPage'));
 const TotpCodesPage = lazy(() => import('@/components/TotpCodesPage'));
@@ -19,7 +17,6 @@ const SecurityDevicesPage = lazy(() => import('@/components/SecurityDevicesPage'
 const AdminPage = lazy(() => import('@/components/AdminPage'));
 const BackupCenterPage = lazy(() => import('@/components/BackupCenterPage'));
 const ImportPage = lazy(() => import('@/components/ImportPage'));
-const OrganizationsPage = lazy(() => import('@/components/OrganizationsPage'));
 
 function RouteContentFallback() {
   return <div className="loading-screen">{t('txt_loading_nodewarden')}</div>;
@@ -35,7 +32,6 @@ function LegacyBackupRedirect(props: { onNavigate: (path: string) => void }) {
 export interface AppMainRoutesProps {
   profile: Profile | null;
   session: SessionState | null;
-  authedFetch: AuthedFetch;
   mobileLayout: boolean;
   importRoute: string;
   settingsHomeRoute: string;
@@ -208,33 +204,6 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
           />
         </Suspense>
       </Route>
-      <Route path="/organizations">
-        {props.profile && (
-          <div className="stack">
-            {props.mobileLayout && (
-              <div className="mobile-settings-subhead">
-                <button type="button" className="btn btn-secondary small mobile-settings-back" onClick={() => props.onNavigate(props.settingsHomeRoute)}>
-                  <span className="btn-icon" aria-hidden="true">{"<"}</span>
-                  {t('txt_back')}
-                </button>
-              </div>
-            )}
-            <RouteErrorBoundary
-              resetKey={`${props.profile.id}:${props.mobileLayout ? 'm' : 'd'}`}
-              title={t('txt_organizations_page_error')}
-              description={t('txt_organizations_page_error_help')}
-            >
-              <Suspense fallback={<RouteContentFallback />}>
-                <OrganizationsPage
-                  profile={props.profile}
-                  authedFetch={props.authedFetch}
-                  onNotify={props.onNotify}
-                />
-              </Suspense>
-            </RouteErrorBoundary>
-          </div>
-        )}
-      </Route>
       <Route path={props.settingsAccountRoute}>
         {props.profile && (
           <div className="stack">
@@ -272,10 +241,6 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
               <Link href="/security/devices" className="mobile-settings-link">
                 <Shield size={18} />
                 <span>{t('nav_device_management')}</span>
-              </Link>
-              <Link href="/organizations" className="mobile-settings-link">
-                <Building2 size={18} />
-                <span>{t('nav_organizations')}</span>
               </Link>
               <Link href={props.importRoute} className="mobile-settings-link">
                 <ArrowUpDown size={18} />

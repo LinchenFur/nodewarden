@@ -55,38 +55,6 @@ import {
 import { handleSync } from './handlers/sync';
 import { handleCiphersImport } from './handlers/import';
 import {
-  handleCreateOrganization,
-  handleGetCollections,
-  handleGetOrganization,
-  handleGetOrganizationBillingMetadata,
-  handleGetOrganizationBillingWarnings,
-  handleGetOrganizationCollectionDetails,
-  handleGetOrganizationCollectionUsers,
-  handleGetOrganizationGroups,
-  handleGetOrganizationPublicKey,
-  handleGetOrganizationCipherDetails,
-  handleGetOrganizationCollections,
-  handleGetOrganizationCollectionsDetails,
-  handleGetOrganizationMember,
-  handleGetOrganizationMemberMiniDetails,
-  handleGetOrganizationMemberResetPasswordDetails,
-  handleGetOrganizationMembers,
-  handleGetOrganizations,
-  handleGetPlans,
-  handleBulkDeleteOrganizationMembers,
-  handleBulkRestoreOrganizationMembers,
-  handleBulkRevokeOrganizationMembers,
-  handleDeleteOrganizationCollection,
-  handleDeleteOrganizationMember,
-  handleRestoreOrganizationMember,
-  handleRevokeOrganizationMember,
-  handleUpdateOrganization,
-  handleUpdateOrganizationCollection,
-  handleUpdateOrganizationCollectionUsers,
-  handleUpdateOrganizationMember,
-  handleCreateOrganizationCollection,
-} from './handlers/organizations';
-import {
   handleCreateAttachment,
   handleUploadAttachment,
   handleGetAttachment,
@@ -167,12 +135,6 @@ export async function handleAuthenticatedRoute(
 
   if (path === '/api/ciphers/import' && method === 'POST') {
     return handleCiphersImport(request, env, userId);
-  }
-
-  if (path === '/api/ciphers/organization-details' && method === 'GET') {
-    const organizationId = new URL(request.url).searchParams.get('organizationId') || '';
-    if (!organizationId) return errorResponse('organizationId is required', 400);
-    return handleGetOrganizationCipherDetails(request, env, userId, organizationId);
   }
 
   if (path === '/api/ciphers/delete' && method === 'POST') {
@@ -258,121 +220,15 @@ export async function handleAuthenticatedRoute(
   }
 
   if (path === '/api/collections' || path.startsWith('/api/collections/')) {
-    if (path === '/api/collections' && method === 'GET') return handleGetCollections(request, env, userId);
+    if (method === 'GET') {
+      return jsonResponse({ data: [], object: 'list', continuationToken: null });
+    }
     return null;
   }
 
-  if (path === '/api/organizations') {
-    if (method === 'GET') return handleGetOrganizations(request, env, userId);
-    if (method === 'POST') return handleCreateOrganization(request, env, userId);
-    return null;
-  }
-
-  if (path === '/api/plans' && method === 'GET') {
-    return handleGetPlans(request, env, userId);
-  }
-
-  const organizationMatch = path.match(/^\/api\/organizations\/([a-f0-9-]+)(\/.*)?$/i);
-  if (organizationMatch) {
-    const organizationId = organizationMatch[1];
-    const subPath = organizationMatch[2] || '';
-
-    if ((subPath === '' || subPath === '/') && method === 'GET') {
-      return handleGetOrganization(request, env, userId, organizationId);
-    }
-    if ((subPath === '' || subPath === '/') && (method === 'PUT' || method === 'POST')) {
-      return handleUpdateOrganization(request, env, userId, organizationId);
-    }
-    if ((subPath === '/public-key' || subPath === '/keys') && method === 'GET') {
-      return handleGetOrganizationPublicKey(request, env, userId, organizationId);
-    }
-    if (subPath === '/collections' && method === 'GET') {
-      return handleGetOrganizationCollections(request, env, userId, organizationId);
-    }
-    if (subPath === '/collections' && method === 'POST') {
-      return handleCreateOrganizationCollection(request, env, userId, organizationId);
-    }
-    if (subPath === '/collections/details' && method === 'GET') {
-      return handleGetOrganizationCollectionsDetails(request, env, userId, organizationId);
-    }
-    if (subPath === '/users' && method === 'GET') {
-      return handleGetOrganizationMembers(request, env, userId, organizationId);
-    }
-    if (subPath === '/users' && method === 'DELETE') {
-      return handleBulkDeleteOrganizationMembers(request, env, userId, organizationId);
-    }
-    if (subPath === '/users/revoke' && (method === 'PUT' || method === 'POST')) {
-      return handleBulkRevokeOrganizationMembers(request, env, userId, organizationId);
-    }
-    if (subPath === '/users/restore' && (method === 'PUT' || method === 'POST')) {
-      return handleBulkRestoreOrganizationMembers(request, env, userId, organizationId);
-    }
-    if (subPath === '/users/mini-details' && method === 'GET') {
-      return handleGetOrganizationMemberMiniDetails(request, env, userId, organizationId);
-    }
-    if (subPath === '/groups' && method === 'GET') {
-      return handleGetOrganizationGroups(request, env, userId, organizationId);
-    }
-    if (subPath === '/groups/details' && method === 'GET') {
-      return handleGetOrganizationGroups(request, env, userId, organizationId);
-    }
-    if (subPath === '/billing/metadata' && method === 'GET') {
-      return handleGetOrganizationBillingMetadata(request, env, userId, organizationId);
-    }
-    if (subPath === '/billing/vnext/warnings' && method === 'GET') {
-      return handleGetOrganizationBillingWarnings(request, env, userId, organizationId);
-    }
-
-    const collectionMatch = subPath.match(/^\/collections\/([a-f0-9-]+)(\/.*)?$/i);
-    if (collectionMatch) {
-      const collectionId = collectionMatch[1];
-      const collectionSubPath = collectionMatch[2] || '';
-      if ((collectionSubPath === '' || collectionSubPath === '/') && (method === 'PUT' || method === 'POST')) {
-        return handleUpdateOrganizationCollection(request, env, userId, organizationId, collectionId);
-      }
-      if ((collectionSubPath === '' || collectionSubPath === '/') && method === 'DELETE') {
-        return handleDeleteOrganizationCollection(request, env, userId, organizationId, collectionId);
-      }
-      if (collectionSubPath === '/delete' && method === 'POST') {
-        return handleDeleteOrganizationCollection(request, env, userId, organizationId, collectionId);
-      }
-      if (collectionSubPath === '/details' && method === 'GET') {
-        return handleGetOrganizationCollectionDetails(request, env, userId, organizationId, collectionId);
-      }
-      if (collectionSubPath === '/users' && method === 'GET') {
-        return handleGetOrganizationCollectionUsers(request, env, userId, organizationId, collectionId);
-      }
-      if (collectionSubPath === '/users' && (method === 'PUT' || method === 'POST')) {
-        return handleUpdateOrganizationCollectionUsers(request, env, userId, organizationId, collectionId);
-      }
-    }
-
-    const memberMatch = subPath.match(/^\/users\/([a-f0-9-]+)$/i);
-    if (memberMatch) {
-      if (method === 'GET') {
-        return handleGetOrganizationMember(request, env, userId, organizationId, memberMatch[1]);
-      }
-      if (method === 'DELETE') {
-        return handleDeleteOrganizationMember(request, env, userId, organizationId, memberMatch[1]);
-      }
-      if (method === 'PUT' || method === 'POST') {
-        return handleUpdateOrganizationMember(request, env, userId, organizationId, memberMatch[1]);
-      }
-    }
-
-    const memberActionMatch = subPath.match(/^\/users\/([a-f0-9-]+)\/(revoke|restore|reset-password-details)$/i);
-    if (memberActionMatch) {
-      const memberId = memberActionMatch[1];
-      const action = memberActionMatch[2];
-      if (action === 'revoke' && (method === 'PUT' || method === 'POST')) {
-        return handleRevokeOrganizationMember(request, env, userId, organizationId, memberId);
-      }
-      if (action === 'restore' && (method === 'PUT' || method === 'POST')) {
-        return handleRestoreOrganizationMember(request, env, userId, organizationId, memberId);
-      }
-      if (action === 'reset-password-details' && method === 'GET') {
-        return handleGetOrganizationMemberResetPasswordDetails(request, env, userId, organizationId, memberId);
-      }
+  if (path === '/api/organizations' || path.startsWith('/api/organizations/')) {
+    if (method === 'GET') {
+      return jsonResponse({ data: [], object: 'list', continuationToken: null });
     }
     return null;
   }

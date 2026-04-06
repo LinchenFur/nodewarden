@@ -16,21 +16,6 @@ export interface Env {
 export type UserRole = 'admin' | 'user';
 export type UserStatus = 'active' | 'banned';
 
-export enum OrganizationMembershipStatus {
-  Revoked = -1,
-  Invited = 0,
-  Accepted = 1,
-  Confirmed = 2,
-}
-
-export enum OrganizationMembershipType {
-  Owner = 0,
-  Admin = 1,
-  User = 2,
-  Manager = 3,
-  Custom = 4,
-}
-
 // Sample JWT secret used by `.dev.vars.example`.
 // If runtime JWT_SECRET equals this value, treat it as unsafe.
 export const DEFAULT_DEV_SECRET = 'Enter-your-JWT-key-here-at-least-32-characters';
@@ -197,54 +182,6 @@ export interface Folder {
   name: string;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface Organization {
-  id: string;
-  name: string;
-  billingEmail: string | null;
-  privateKey: string | null;
-  publicKey: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface OrganizationMembership {
-  id: string;
-  organizationId: string;
-  userId: string;
-  userEmail: string;
-  key: string | null;
-  status: number;
-  type: number;
-  accessAll: boolean;
-  externalId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface OrgCollection {
-  id: string;
-  organizationId: string;
-  name: string;
-  externalId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CollectionMembership {
-  collectionId: string;
-  membershipId: string;
-  readOnly: boolean;
-  hidePasswords: boolean;
-  manage: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CollectionCipher {
-  collectionId: string;
-  cipherId: string;
 }
 
 export interface Device {

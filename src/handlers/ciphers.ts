@@ -6,26 +6,6 @@ import { generateUUID } from '../utils/uuid';
 import { deleteAllAttachmentsForCipher } from './attachments';
 import { parsePagination, encodeContinuationToken } from '../utils/pagination';
 import { readActingDeviceIdentifier } from '../utils/device';
-import {
-  getAccessibleCiphersForUser,
-  loadOrganizationAccessSnapshot,
-  resolveCipherAccess,
-} from '../utils/organization-access';
-import {
-  hasFullOrganizationAccess,
-  isMembershipAtLeast,
-} from '../utils/organization-permissions';
-
-interface CipherResponseAccess {
-  organizationId?: string | null;
-  collectionIds?: string[];
-  edit?: boolean;
-  viewPassword?: boolean;
-  permissions?: {
-    delete: boolean;
-    restore: boolean;
-  } | null;
-}
 
 function normalizeOptionalId(value: unknown): string | null {
   if (value == null) return null;
@@ -139,8 +119,7 @@ export function formatAttachments(attachments: Attachment[]): any[] | null {
 // survive a round-trip without code changes.
 export function cipherToResponse(
   cipher: Cipher,
-  attachments: Attachment[] = [],
-  access: CipherResponseAccess = {}
+  attachments: Attachment[] = []
 ): CipherResponse {
   // Strip internal-only fields that must not appear in the API response
   const { userId, createdAt, updatedAt, archivedAt, deletedAt, ...passthrough } = cipher;
@@ -153,20 +132,20 @@ export function cipherToResponse(
     // Server-computed / enforced fields (always override)
     folderId: normalizeOptionalId(cipher.folderId),
     type: Number(cipher.type) || 1,
-    organizationId: access.organizationId ?? normalizeOptionalId((cipher as { organizationId?: unknown }).organizationId ?? null),
+    organizationId: null,
     organizationUseTotp: false,
     creationDate: createdAt,
     revisionDate: updatedAt,
     deletedDate: deletedAt,
     archivedDate: archivedAt ?? null,
-    edit: access.edit ?? true,
-    viewPassword: access.viewPassword ?? true,
-    permissions: access.permissions ?? {
+    edit: true,
+    viewPassword: true,
+    permissions: {
       delete: true,
       restore: true,
     },
     object: 'cipher',
-    collectionIds: access.collectionIds ?? [],
+    collectionIds: [],
     attachments: formatAttachments(attachments),
     login: normalizedLogin,
     sshKey: normalizedSshKey,
@@ -180,37 +159,33 @@ export async function handleGetCiphers(request: Request, env: Env, userId: strin
   const url = new URL(request.url);
   const includeDeleted = url.searchParams.get('deleted') === 'true';
   const pagination = parsePagination(url);
-  const accessible = await getAccessibleCiphersForUser(storage, userId);
-  const visibleCiphers = includeDeleted
-    ? accessible.ciphers
-    : accessible.ciphers.filter((cipher) => !cipher.deletedAt);
 
-  let filteredCiphers = visibleCiphers;
+  let filteredCiphers: Cipher[];
   let continuationToken: string | null = null;
   if (pagination) {
-    const pageRows = visibleCiphers.slice(pagination.offset, pagination.offset + pagination.limit + 1);
+    const pageRows = await storage.getCiphersPage(
+      userId,
+      includeDeleted,
+      pagination.limit + 1,
+      pagination.offset
+    );
     const hasNext = pageRows.length > pagination.limit;
     filteredCiphers = hasNext ? pageRows.slice(0, pagination.limit) : pageRows;
     continuationToken = hasNext ? encodeContinuationToken(pagination.offset + filteredCiphers.length) : null;
+  } else {
+    const ciphers = await storage.getAllCiphers(userId);
+    filteredCiphers = includeDeleted
+      ? ciphers
+      : ciphers.filter(c => !c.deletedAt);
   }
 
-  const attachmentsByCipher = await storage.getAttachmentsByCipherIds(filteredCiphers.map((cipher) => cipher.id));
+  const attachmentsByCipher = await storage.getAttachmentsByUserId(userId);
 
   // Get attachments for all ciphers
   const cipherResponses = [];
   for (const cipher of filteredCiphers) {
     const attachments = attachmentsByCipher.get(cipher.id) || [];
-    const access = await resolveCipherAccess(storage, userId, cipher, accessible.snapshot, accessible.collectionIdsByCipherId);
-    cipherResponses.push(cipherToResponse(cipher, attachments, {
-      organizationId: access.organizationId,
-      collectionIds: access.collectionIds,
-      edit: access.canEdit,
-      viewPassword: access.canViewPassword,
-      permissions: {
-        delete: access.canDelete,
-        restore: access.canRestore,
-      },
-    }));
+    cipherResponses.push(cipherToResponse(cipher, attachments));
   }
 
   return jsonResponse({
@@ -225,26 +200,13 @@ export async function handleGetCipher(request: Request, env: Env, userId: string
   const storage = new StorageService(env.DB);
   const cipher = await storage.getCipher(id);
 
-  if (!cipher) {
+  if (!cipher || cipher.userId !== userId) {
     return errorResponse('Cipher not found', 404);
   }
-  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
-  const collectionIdsByCipherId = await storage.getCollectionIdsByCipherIds([cipher.id]);
-  const access = await resolveCipherAccess(storage, userId, cipher, snapshot, collectionIdsByCipherId);
-  if (!access.canAccess) return errorResponse('Cipher not found', 404);
 
   const attachments = await storage.getAttachmentsByCipher(cipher.id);
   return jsonResponse(
-    cipherToResponse(cipher, attachments, {
-      organizationId: access.organizationId,
-      collectionIds: access.collectionIds,
-      edit: access.canEdit,
-      viewPassword: access.canViewPassword,
-      permissions: {
-        delete: access.canDelete,
-        restore: access.canRestore,
-      },
-    })
+    cipherToResponse(cipher, attachments)
   );
 }
 
@@ -270,10 +232,6 @@ export async function handleCreateCipher(request: Request, env: Env, userId: str
   const cipherData = body.Cipher || body.cipher || body;
 
   const now = new Date().toISOString();
-  const organizationId = normalizeOptionalId(cipherData.organizationId ?? cipherData.OrganizationId ?? null);
-  const postedCollectionIds = Array.isArray(cipherData.collectionIds)
-    ? Array.from(new Set(cipherData.collectionIds.map((value: unknown) => String(value || '').trim()).filter(Boolean))) as string[]
-    : [];
   // Opaque passthrough: spread ALL client fields to preserve unknown/future ones,
   // then override only server-controlled fields.
   const cipher: Cipher = {
@@ -284,7 +242,6 @@ export async function handleCreateCipher(request: Request, env: Env, userId: str
     type: Number(cipherData.type) || 1,
     favorite: !!cipherData.favorite,
     reprompt: cipherData.reprompt || 0,
-    organizationId,
     createdAt: now,
     updatedAt: now,
     archivedAt: readCipherArchivedAt(cipherData, null),
@@ -295,43 +252,17 @@ export async function handleCreateCipher(request: Request, env: Env, userId: str
   normalizeCipherForStorage(cipher);
 
   // Prevent referencing a folder owned by another user.
-  if (organizationId) {
-    cipher.folderId = null;
-    const membership = await storage.getOrganizationMembershipByUserAndOrg(userId, organizationId);
-    if (!membership || Number(membership.status) !== 2) {
-      return errorResponse('Organization not found', 404);
-    }
-    if (!hasFullOrganizationAccess(membership) && !isMembershipAtLeast(membership.type, 3)) {
-      return errorResponse('Insufficient permissions', 403);
-    }
-  } else if (cipher.folderId) {
+  if (cipher.folderId) {
     const folderOk = await verifyFolderOwnership(storage, cipher.folderId, userId);
     if (!folderOk) return errorResponse('Folder not found', 404);
   }
 
   await storage.saveCipher(cipher);
-  await storage.replaceCipherCollections(cipher.id, organizationId ? postedCollectionIds : []);
-  if (organizationId) {
-    const revisions = await storage.updateRevisionDatesForOrganization(organizationId);
-    for (const [memberUserId, revisionDate] of revisions.entries()) {
-      await notifyVaultSyncForRequest(request, env, memberUserId, revisionDate);
-    }
-  } else {
-    const revisionDate = await storage.updateRevisionDate(userId);
-    await notifyVaultSyncForRequest(request, env, userId, revisionDate);
-  }
+  const revisionDate = await storage.updateRevisionDate(userId);
+  await notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   return jsonResponse(
-    cipherToResponse(cipher, [], {
-      organizationId,
-      collectionIds: organizationId ? postedCollectionIds : [],
-      edit: true,
-      viewPassword: true,
-      permissions: {
-        delete: true,
-        restore: true,
-      },
-    }),
+    cipherToResponse(cipher, []),
     200
   );
 }
@@ -341,14 +272,9 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
   const storage = new StorageService(env.DB);
   const existingCipher = await storage.getCipher(id);
 
-  if (!existingCipher) {
+  if (!existingCipher || existingCipher.userId !== userId) {
     return errorResponse('Cipher not found', 404);
   }
-  const existingCollections = await storage.getCollectionIdsByCipherIds([existingCipher.id]);
-  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
-  const existingAccess = await resolveCipherAccess(storage, userId, existingCipher, snapshot, existingCollections);
-  if (!existingAccess.canAccess) return errorResponse('Cipher not found', 404);
-  if (!existingAccess.canEdit) return errorResponse('Insufficient permissions', 403);
 
   let body: any;
   try {
@@ -360,10 +286,6 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
   // Handle nested cipher object
   // Android client sends PascalCase "Cipher" for organization ciphers
   const cipherData = body.Cipher || body.cipher || body;
-  const nextOrganizationId = normalizeOptionalId(cipherData.organizationId ?? cipherData.OrganizationId ?? (existingCipher as { organizationId?: unknown }).organizationId ?? null);
-  const postedCollectionIds = Array.isArray(cipherData.collectionIds)
-    ? Array.from(new Set(cipherData.collectionIds.map((value: unknown) => String(value || '').trim()).filter(Boolean))) as string[]
-    : (existingAccess.collectionIds || []);
 
   // Opaque passthrough: merge existing stored data with ALL incoming client fields.
   // Unknown/future fields from the client are preserved; server-controlled fields are protected.
@@ -376,7 +298,6 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
     type: Number(cipherData.type) || existingCipher.type,
     favorite: cipherData.favorite ?? existingCipher.favorite,
     reprompt: cipherData.reprompt ?? existingCipher.reprompt,
-    organizationId: nextOrganizationId,
     createdAt: existingCipher.createdAt,
     updatedAt: new Date().toISOString(),
     archivedAt: readCipherArchivedAt(cipherData, existingCipher.archivedAt ?? null),
@@ -396,36 +317,17 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
   normalizeCipherForStorage(cipher);
 
   // Prevent referencing a folder owned by another user.
-  if (nextOrganizationId) {
-    cipher.folderId = null;
-  } else if (cipher.folderId) {
+  if (cipher.folderId) {
     const folderOk = await verifyFolderOwnership(storage, cipher.folderId, userId);
     if (!folderOk) return errorResponse('Folder not found', 404);
   }
 
   await storage.saveCipher(cipher);
-  await storage.replaceCipherCollections(cipher.id, nextOrganizationId ? postedCollectionIds : []);
-  if (nextOrganizationId) {
-    const revisions = await storage.updateRevisionDatesForOrganization(nextOrganizationId);
-    for (const [memberUserId, revisionDate] of revisions.entries()) {
-      await notifyVaultSyncForRequest(request, env, memberUserId, revisionDate);
-    }
-  } else {
-    const revisionDate = await storage.updateRevisionDate(userId);
-    await notifyVaultSyncForRequest(request, env, userId, revisionDate);
-  }
+  const revisionDate = await storage.updateRevisionDate(userId);
+  await notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   return jsonResponse(
-    cipherToResponse(cipher, [], {
-      organizationId: nextOrganizationId,
-      collectionIds: nextOrganizationId ? postedCollectionIds : [],
-      edit: true,
-      viewPassword: true,
-      permissions: {
-        delete: true,
-        restore: true,
-      },
-    })
+    cipherToResponse(cipher, [])
   );
 }
 
@@ -434,41 +336,20 @@ export async function handleDeleteCipher(request: Request, env: Env, userId: str
   const storage = new StorageService(env.DB);
   const cipher = await storage.getCipher(id);
 
-  if (!cipher) {
+  if (!cipher || cipher.userId !== userId) {
     return errorResponse('Cipher not found', 404);
   }
-  const collectionIdsByCipherId = await storage.getCollectionIdsByCipherIds([cipher.id]);
-  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
-  const access = await resolveCipherAccess(storage, userId, cipher, snapshot, collectionIdsByCipherId);
-  if (!access.canAccess) return errorResponse('Cipher not found', 404);
-  if (!access.canDelete) return errorResponse('Insufficient permissions', 403);
 
   // Soft delete
   cipher.deletedAt = new Date().toISOString();
   cipher.updatedAt = cipher.deletedAt;
   syncCipherComputedAliases(cipher);
   await storage.saveCipher(cipher);
-  if (access.organizationId) {
-    const revisions = await storage.updateRevisionDatesForOrganization(access.organizationId);
-    for (const [memberUserId, revisionDate] of revisions.entries()) {
-      await notifyVaultSyncForRequest(request, env, memberUserId, revisionDate);
-    }
-  } else {
-    const revisionDate = await storage.updateRevisionDate(userId);
-    await notifyVaultSyncForRequest(request, env, userId, revisionDate);
-  }
+  const revisionDate = await storage.updateRevisionDate(userId);
+  await notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   return jsonResponse(
-    cipherToResponse(cipher, [], {
-      organizationId: access.organizationId,
-      collectionIds: access.collectionIds,
-      edit: access.canEdit,
-      viewPassword: access.canViewPassword,
-      permissions: {
-        delete: access.canDelete,
-        restore: access.canRestore,
-      },
-    })
+    cipherToResponse(cipher, [])
   );
 }
 
@@ -481,27 +362,15 @@ export async function handleDeleteCipherCompat(request: Request, env: Env, userI
   const storage = new StorageService(env.DB);
   const cipher = await storage.getCipher(id);
 
-  if (!cipher) {
+  if (!cipher || cipher.userId !== userId) {
     return errorResponse('Cipher not found', 404);
   }
-  const collectionIdsByCipherId = await storage.getCollectionIdsByCipherIds([cipher.id]);
-  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
-  const access = await resolveCipherAccess(storage, userId, cipher, snapshot, collectionIdsByCipherId);
-  if (!access.canAccess) return errorResponse('Cipher not found', 404);
-  if (!access.canDelete) return errorResponse('Insufficient permissions', 403);
 
   if (cipher.deletedAt) {
     await deleteAllAttachmentsForCipher(env, id);
-    await storage.deleteCipher(id, cipher.userId);
-    if (access.organizationId) {
-      const revisions = await storage.updateRevisionDatesForOrganization(access.organizationId);
-      for (const [memberUserId, revisionDate] of revisions.entries()) {
-        await notifyVaultSyncForRequest(request, env, memberUserId, revisionDate);
-      }
-    } else {
-      const revisionDate = await storage.updateRevisionDate(userId);
-      await notifyVaultSyncForRequest(request, env, userId, revisionDate);
-    }
+    await storage.deleteCipher(id, userId);
+    const revisionDate = await storage.updateRevisionDate(userId);
+    await notifyVaultSyncForRequest(request, env, userId, revisionDate);
     return new Response(null, { status: 204 });
   }
 
@@ -513,28 +382,16 @@ export async function handlePermanentDeleteCipher(request: Request, env: Env, us
   const storage = new StorageService(env.DB);
   const cipher = await storage.getCipher(id);
 
-  if (!cipher) {
+  if (!cipher || cipher.userId !== userId) {
     return errorResponse('Cipher not found', 404);
   }
-  const collectionIdsByCipherId = await storage.getCollectionIdsByCipherIds([cipher.id]);
-  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
-  const access = await resolveCipherAccess(storage, userId, cipher, snapshot, collectionIdsByCipherId);
-  if (!access.canAccess) return errorResponse('Cipher not found', 404);
-  if (!access.canDelete) return errorResponse('Insufficient permissions', 403);
 
   // Delete all attachments first
   await deleteAllAttachmentsForCipher(env, id);
 
-  await storage.deleteCipher(id, cipher.userId);
-  if (access.organizationId) {
-    const revisions = await storage.updateRevisionDatesForOrganization(access.organizationId);
-    for (const [memberUserId, revisionDate] of revisions.entries()) {
-      await notifyVaultSyncForRequest(request, env, memberUserId, revisionDate);
-    }
-  } else {
-    const revisionDate = await storage.updateRevisionDate(userId);
-    await notifyVaultSyncForRequest(request, env, userId, revisionDate);
-  }
+  await storage.deleteCipher(id, userId);
+  const revisionDate = await storage.updateRevisionDate(userId);
+  await notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   return new Response(null, { status: 204 });
 }
@@ -544,40 +401,19 @@ export async function handleRestoreCipher(request: Request, env: Env, userId: st
   const storage = new StorageService(env.DB);
   const cipher = await storage.getCipher(id);
 
-  if (!cipher) {
+  if (!cipher || cipher.userId !== userId) {
     return errorResponse('Cipher not found', 404);
   }
-  const collectionIdsByCipherId = await storage.getCollectionIdsByCipherIds([cipher.id]);
-  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
-  const access = await resolveCipherAccess(storage, userId, cipher, snapshot, collectionIdsByCipherId);
-  if (!access.canAccess) return errorResponse('Cipher not found', 404);
-  if (!access.canRestore) return errorResponse('Insufficient permissions', 403);
 
   cipher.deletedAt = null;
   cipher.updatedAt = new Date().toISOString();
   syncCipherComputedAliases(cipher);
   await storage.saveCipher(cipher);
-  if (access.organizationId) {
-    const revisions = await storage.updateRevisionDatesForOrganization(access.organizationId);
-    for (const [memberUserId, revisionDate] of revisions.entries()) {
-      await notifyVaultSyncForRequest(request, env, memberUserId, revisionDate);
-    }
-  } else {
-    const revisionDate = await storage.updateRevisionDate(userId);
-    await notifyVaultSyncForRequest(request, env, userId, revisionDate);
-  }
+  const revisionDate = await storage.updateRevisionDate(userId);
+  await notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   return jsonResponse(
-    cipherToResponse(cipher, [], {
-      organizationId: access.organizationId,
-      collectionIds: access.collectionIds,
-      edit: access.canEdit,
-      viewPassword: access.canViewPassword,
-      permissions: {
-        delete: access.canDelete,
-        restore: access.canRestore,
-      },
-    })
+    cipherToResponse(cipher, [])
   );
 }
 
@@ -586,14 +422,9 @@ export async function handlePartialUpdateCipher(request: Request, env: Env, user
   const storage = new StorageService(env.DB);
   const cipher = await storage.getCipher(id);
 
-  if (!cipher) {
+  if (!cipher || cipher.userId !== userId) {
     return errorResponse('Cipher not found', 404);
   }
-  const collectionIdsByCipherId = await storage.getCollectionIdsByCipherIds([cipher.id]);
-  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
-  const access = await resolveCipherAccess(storage, userId, cipher, snapshot, collectionIdsByCipherId);
-  if (!access.canAccess) return errorResponse('Cipher not found', 404);
-  if (!access.canEdit) return errorResponse('Insufficient permissions', 403);
 
   let body: { folderId?: string | null; favorite?: boolean };
   try {
@@ -604,11 +435,11 @@ export async function handlePartialUpdateCipher(request: Request, env: Env, user
 
   if (body.folderId !== undefined) {
     const folderId = normalizeOptionalId(body.folderId);
-    if (folderId && !access.organizationId) {
+    if (folderId) {
       const folderOk = await verifyFolderOwnership(storage, folderId, userId);
       if (!folderOk) return errorResponse('Folder not found', 404);
     }
-    cipher.folderId = access.organizationId ? null : folderId;
+    cipher.folderId = folderId;
   }
   if (body.favorite !== undefined) {
     cipher.favorite = body.favorite;
@@ -617,27 +448,11 @@ export async function handlePartialUpdateCipher(request: Request, env: Env, user
   syncCipherComputedAliases(cipher);
 
   await storage.saveCipher(cipher);
-  if (access.organizationId) {
-    const revisions = await storage.updateRevisionDatesForOrganization(access.organizationId);
-    for (const [memberUserId, revisionDate] of revisions.entries()) {
-      await notifyVaultSyncForRequest(request, env, memberUserId, revisionDate);
-    }
-  } else {
-    const revisionDate = await storage.updateRevisionDate(userId);
-    await notifyVaultSyncForRequest(request, env, userId, revisionDate);
-  }
+  const revisionDate = await storage.updateRevisionDate(userId);
+  await notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   return jsonResponse(
-    cipherToResponse(cipher, [], {
-      organizationId: access.organizationId,
-      collectionIds: access.collectionIds,
-      edit: access.canEdit,
-      viewPassword: access.canViewPassword,
-      permissions: {
-        delete: access.canDelete,
-        restore: access.canRestore,
-      },
-    })
+    cipherToResponse(cipher, [])
   );
 }
 
@@ -698,14 +513,9 @@ export async function handleArchiveCipher(request: Request, env: Env, userId: st
   const storage = new StorageService(env.DB);
   const cipher = await storage.getCipher(id);
 
-  if (!cipher) {
+  if (!cipher || cipher.userId !== userId) {
     return errorResponse('Cipher not found', 404);
   }
-  const collectionIdsByCipherId = await storage.getCollectionIdsByCipherIds([cipher.id]);
-  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
-  const access = await resolveCipherAccess(storage, userId, cipher, snapshot, collectionIdsByCipherId);
-  if (!access.canAccess) return errorResponse('Cipher not found', 404);
-  if (!access.canEdit) return errorResponse('Insufficient permissions', 403);
   if (cipher.deletedAt) {
     return errorResponse('Cannot archive a deleted cipher', 400);
   }
@@ -714,28 +524,12 @@ export async function handleArchiveCipher(request: Request, env: Env, userId: st
   cipher.updatedAt = cipher.archivedAt;
   normalizeCipherForStorage(cipher);
   await storage.saveCipher(cipher);
-  if (access.organizationId) {
-    const revisions = await storage.updateRevisionDatesForOrganization(access.organizationId);
-    for (const [memberUserId, revisionDate] of revisions.entries()) {
-      await notifyVaultSyncForRequest(request, env, memberUserId, revisionDate);
-    }
-  } else {
-    const revisionDate = await storage.updateRevisionDate(userId);
-    await notifyVaultSyncForRequest(request, env, userId, revisionDate);
-  }
+  const revisionDate = await storage.updateRevisionDate(userId);
+  await notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   const attachments = await storage.getAttachmentsByCipher(cipher.id);
   return jsonResponse(
-    cipherToResponse(cipher, attachments, {
-      organizationId: access.organizationId,
-      collectionIds: access.collectionIds,
-      edit: access.canEdit,
-      viewPassword: access.canViewPassword,
-      permissions: {
-        delete: access.canDelete,
-        restore: access.canRestore,
-      },
-    })
+    cipherToResponse(cipher, attachments)
   );
 }
 
@@ -744,41 +538,20 @@ export async function handleUnarchiveCipher(request: Request, env: Env, userId: 
   const storage = new StorageService(env.DB);
   const cipher = await storage.getCipher(id);
 
-  if (!cipher) {
+  if (!cipher || cipher.userId !== userId) {
     return errorResponse('Cipher not found', 404);
   }
-  const collectionIdsByCipherId = await storage.getCollectionIdsByCipherIds([cipher.id]);
-  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
-  const access = await resolveCipherAccess(storage, userId, cipher, snapshot, collectionIdsByCipherId);
-  if (!access.canAccess) return errorResponse('Cipher not found', 404);
-  if (!access.canEdit) return errorResponse('Insufficient permissions', 403);
 
   cipher.archivedAt = null;
   cipher.updatedAt = new Date().toISOString();
   normalizeCipherForStorage(cipher);
   await storage.saveCipher(cipher);
-  if (access.organizationId) {
-    const revisions = await storage.updateRevisionDatesForOrganization(access.organizationId);
-    for (const [memberUserId, revisionDate] of revisions.entries()) {
-      await notifyVaultSyncForRequest(request, env, memberUserId, revisionDate);
-    }
-  } else {
-    const revisionDate = await storage.updateRevisionDate(userId);
-    await notifyVaultSyncForRequest(request, env, userId, revisionDate);
-  }
+  const revisionDate = await storage.updateRevisionDate(userId);
+  await notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   const attachments = await storage.getAttachmentsByCipher(cipher.id);
   return jsonResponse(
-    cipherToResponse(cipher, attachments, {
-      organizationId: access.organizationId,
-      collectionIds: access.collectionIds,
-      edit: access.canEdit,
-      viewPassword: access.canViewPassword,
-      permissions: {
-        delete: access.canDelete,
-        restore: access.canRestore,
-      },
-    })
+    cipherToResponse(cipher, attachments)
   );
 }
 

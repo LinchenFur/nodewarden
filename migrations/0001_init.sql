@@ -42,7 +42,6 @@ CREATE TABLE IF NOT EXISTS user_revisions (
 CREATE TABLE IF NOT EXISTS ciphers (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  organization_id TEXT,
   type INTEGER NOT NULL,
   folder_id TEXT,
   name TEXT,
@@ -58,7 +57,6 @@ CREATE TABLE IF NOT EXISTS ciphers (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_ciphers_user_updated ON ciphers(user_id, updated_at);
-CREATE INDEX IF NOT EXISTS idx_ciphers_org_updated ON ciphers(organization_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_ciphers_user_archived ON ciphers(user_id, archived_at);
 CREATE INDEX IF NOT EXISTS idx_ciphers_user_deleted ON ciphers(user_id, deleted_at);
 
@@ -71,69 +69,6 @@ CREATE TABLE IF NOT EXISTS folders (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_folders_user_updated ON folders(user_id, updated_at);
-
-CREATE TABLE IF NOT EXISTS organizations (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  billing_email TEXT,
-  private_key TEXT,
-  public_key TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS organization_memberships (
-  id TEXT PRIMARY KEY,
-  organization_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  user_email TEXT NOT NULL,
-  akey TEXT,
-  status INTEGER NOT NULL,
-  atype INTEGER NOT NULL,
-  access_all INTEGER NOT NULL DEFAULT 0,
-  external_id TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  UNIQUE (organization_id, user_id)
-);
-CREATE INDEX IF NOT EXISTS idx_org_memberships_user_status ON organization_memberships(user_id, status);
-CREATE INDEX IF NOT EXISTS idx_org_memberships_org_status ON organization_memberships(organization_id, status);
-
-CREATE TABLE IF NOT EXISTS org_collections (
-  id TEXT PRIMARY KEY,
-  organization_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  external_id TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_org_collections_org_updated ON org_collections(organization_id, updated_at);
-
-CREATE TABLE IF NOT EXISTS collection_memberships (
-  collection_id TEXT NOT NULL,
-  membership_id TEXT NOT NULL,
-  read_only INTEGER NOT NULL DEFAULT 0,
-  hide_passwords INTEGER NOT NULL DEFAULT 0,
-  manage INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  PRIMARY KEY (collection_id, membership_id),
-  FOREIGN KEY (collection_id) REFERENCES org_collections(id) ON DELETE CASCADE,
-  FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_collection_memberships_member ON collection_memberships(membership_id);
-
-CREATE TABLE IF NOT EXISTS collection_ciphers (
-  collection_id TEXT NOT NULL,
-  cipher_id TEXT NOT NULL,
-  PRIMARY KEY (collection_id, cipher_id),
-  FOREIGN KEY (collection_id) REFERENCES org_collections(id) ON DELETE CASCADE,
-  FOREIGN KEY (cipher_id) REFERENCES ciphers(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_collection_ciphers_cipher ON collection_ciphers(cipher_id);
 
 CREATE TABLE IF NOT EXISTS attachments (
   id TEXT PRIMARY KEY,
