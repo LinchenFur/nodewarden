@@ -420,6 +420,73 @@ export async function handleGetOrganizationPublicKey(
   });
 }
 
+export async function handleGetPlans(request: Request, env: Env, userId: string): Promise<Response> {
+  void request;
+  void env;
+  void userId;
+  return jsonResponse({
+    object: 'list',
+    data: [
+      {
+        object: 'plan',
+        type: 0,
+        product: 0,
+        name: 'Free',
+        nameLocalizationKey: 'planNameFree',
+        bitwardenProduct: 0,
+        maxUsers: 0,
+        descriptionLocalizationKey: 'planDescFree',
+      },
+      {
+        object: 'plan',
+        type: 0,
+        product: 1,
+        name: 'Free',
+        nameLocalizationKey: 'planNameFree',
+        bitwardenProduct: 1,
+        maxUsers: 0,
+        descriptionLocalizationKey: 'planDescFree',
+      },
+    ],
+    continuationToken: null,
+  });
+}
+
+export async function handleGetOrganizationBillingMetadata(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+  return jsonResponse({
+    object: 'list',
+    data: [],
+    continuationToken: null,
+  });
+}
+
+export async function handleGetOrganizationBillingWarnings(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+  return jsonResponse({
+    freeTrial: null,
+    inactiveSubscription: null,
+    resellerRenewal: null,
+    taxId: null,
+  });
+}
+
 export async function handleGetCollections(request: Request, env: Env, userId: string): Promise<Response> {
   void request;
   const storage = new StorageService(env.DB);
@@ -460,6 +527,23 @@ export async function handleGetOrganizationCollections(
       name: collection.name,
       object: 'collection',
     })),
+    object: 'list',
+    continuationToken: null,
+  });
+}
+
+export async function handleGetOrganizationGroups(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+  return jsonResponse({
+    data: [],
     object: 'list',
     continuationToken: null,
   });

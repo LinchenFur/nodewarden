@@ -58,8 +58,11 @@ import {
   handleCreateOrganization,
   handleGetCollections,
   handleGetOrganization,
+  handleGetOrganizationBillingMetadata,
+  handleGetOrganizationBillingWarnings,
   handleGetOrganizationCollectionDetails,
   handleGetOrganizationCollectionUsers,
+  handleGetOrganizationGroups,
   handleGetOrganizationPublicKey,
   handleGetOrganizationCipherDetails,
   handleGetOrganizationCollections,
@@ -68,6 +71,7 @@ import {
   handleGetOrganizationMemberMiniDetails,
   handleGetOrganizationMembers,
   handleGetOrganizations,
+  handleGetPlans,
   handleDeleteOrganizationCollection,
   handleUpdateOrganization,
   handleUpdateOrganizationCollection,
@@ -257,6 +261,10 @@ export async function handleAuthenticatedRoute(
     return null;
   }
 
+  if (path === '/api/plans' && method === 'GET') {
+    return handleGetPlans(request, env, userId);
+  }
+
   const organizationMatch = path.match(/^\/api\/organizations\/([a-f0-9-]+)(\/.*)?$/i);
   if (organizationMatch) {
     const organizationId = organizationMatch[1];
@@ -285,6 +293,18 @@ export async function handleAuthenticatedRoute(
     }
     if (subPath === '/users/mini-details' && method === 'GET') {
       return handleGetOrganizationMemberMiniDetails(request, env, userId, organizationId);
+    }
+    if (subPath === '/groups' && method === 'GET') {
+      return handleGetOrganizationGroups(request, env, userId, organizationId);
+    }
+    if (subPath === '/groups/details' && method === 'GET') {
+      return handleGetOrganizationGroups(request, env, userId, organizationId);
+    }
+    if (subPath === '/billing/metadata' && method === 'GET') {
+      return handleGetOrganizationBillingMetadata(request, env, userId, organizationId);
+    }
+    if (subPath === '/billing/vnext/warnings' && method === 'GET') {
+      return handleGetOrganizationBillingWarnings(request, env, userId, organizationId);
     }
 
     const collectionMatch = subPath.match(/^\/collections\/([a-f0-9-]+)(\/.*)?$/i);
