@@ -25,6 +25,7 @@ import {
   mergeCollectionAccess,
   membershipTypeToResponse,
   normalizeOrganizationMembershipType,
+  resolveOrganizationPermissions,
 } from '../utils/organization-permissions';
 import { cipherToResponse } from './ciphers';
 
@@ -64,6 +65,7 @@ async function requireConfirmedMembership(
 }
 
 function buildOrganizationResponse(organization: Organization): any {
+  const permissions = resolveOrganizationPermissions(0, true);
   return {
     id: organization.id,
     identifier: null,
@@ -91,6 +93,18 @@ function buildOrganizationResponse(organization: Organization): any {
     productTierType: 3,
     keyConnectorEnabled: false,
     keyConnectorUrl: null,
+    permissions,
+    canCreateNewCollections: permissions.createNewCollections,
+    canEditAnyCollection: permissions.editAnyCollection,
+    canDeleteAnyCollection: permissions.deleteAnyCollection,
+    canAccessEventLogs: permissions.accessEventLogs,
+    canAccessImportExport: permissions.accessImportExport,
+    canAccessReports: permissions.accessReports,
+    canManageGroups: permissions.manageGroups,
+    canManagePolicies: permissions.managePolicies,
+    canManageUsers: permissions.manageUsers,
+    canManageUsersPassword: permissions.manageResetPassword,
+    allowAdminAccessToAllCollectionItems: true,
     object: 'organization',
   };
 }

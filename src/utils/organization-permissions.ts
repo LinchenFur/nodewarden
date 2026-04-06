@@ -11,6 +11,66 @@ export interface ResolvedCollectionAccess {
   manage: boolean;
 }
 
+export interface OrganizationPermissionsResponse {
+  accessEventLogs: boolean;
+  accessImportExport: boolean;
+  accessReports: boolean;
+  createNewCollections: boolean;
+  editAnyCollection: boolean;
+  deleteAnyCollection: boolean;
+  manageGroups: boolean;
+  managePolicies: boolean;
+  manageSso: boolean;
+  manageUsers: boolean;
+  manageResetPassword: boolean;
+  manageScim: boolean;
+}
+
+const NO_ORGANIZATION_PERMISSIONS: OrganizationPermissionsResponse = {
+  accessEventLogs: false,
+  accessImportExport: false,
+  accessReports: false,
+  createNewCollections: false,
+  editAnyCollection: false,
+  deleteAnyCollection: false,
+  manageGroups: false,
+  managePolicies: false,
+  manageSso: false,
+  manageUsers: false,
+  manageResetPassword: false,
+  manageScim: false,
+};
+
+const FULL_ORGANIZATION_PERMISSIONS: OrganizationPermissionsResponse = {
+  accessEventLogs: true,
+  accessImportExport: true,
+  accessReports: true,
+  createNewCollections: true,
+  editAnyCollection: true,
+  deleteAnyCollection: true,
+  manageGroups: true,
+  managePolicies: true,
+  manageSso: false,
+  manageUsers: true,
+  manageResetPassword: true,
+  manageScim: false,
+};
+
+const MANAGER_ORGANIZATION_PERMISSIONS: OrganizationPermissionsResponse = {
+  accessEventLogs: false,
+  accessImportExport: false,
+  accessReports: false,
+  createNewCollections: true,
+  editAnyCollection: true,
+  deleteAnyCollection: true,
+  manageGroups: false,
+  managePolicies: false,
+  manageSso: false,
+  manageUsers: false,
+  manageResetPassword: false,
+  manageScim: false,
+};
+
 function organizationTypeAccessRank(type: number): number {
   switch (Number(type)) {
     case 0:
@@ -39,6 +99,20 @@ export function membershipTypeToResponse(
   const normalized = normalizeOrganizationMembershipType(type);
   if (normalized === 3 && accessAll) return 4 as OrganizationMembershipType;
   return normalized as OrganizationMembershipType;
+}
+
+export function resolveOrganizationPermissions(
+  type: number,
+  accessAll: boolean
+): OrganizationPermissionsResponse {
+  const normalized = normalizeOrganizationMembershipType(type);
+  if (normalized === 0 || normalized === 1) {
+    return { ...FULL_ORGANIZATION_PERMISSIONS };
+  }
+  if (normalized === 3 || (normalized === 4 && accessAll)) {
+    return { ...MANAGER_ORGANIZATION_PERMISSIONS };
+  }
+  return { ...NO_ORGANIZATION_PERMISSIONS };
 }
 
 export function isConfirmedMembership(membership: Pick<OrganizationMembership, 'status'> | null | undefined): boolean {

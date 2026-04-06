@@ -11,6 +11,7 @@ import {
   isOrganizationManager,
   membershipTypeToResponse,
   mergeCollectionAccess,
+  resolveOrganizationPermissions,
 } from './organization-permissions';
 
 export interface OrganizationAccessSnapshot {
@@ -27,21 +28,6 @@ export interface ResolvedCipherAccess {
   canRestore: boolean;
   canViewPassword: boolean;
 }
-
-const CUSTOM_ROLE_PERMISSIONS = {
-  accessEventLogs: false,
-  accessImportExport: false,
-  accessReports: false,
-  createNewCollections: true,
-  editAnyCollection: true,
-  deleteAnyCollection: true,
-  manageGroups: false,
-  managePolicies: false,
-  manageSso: false,
-  manageUsers: false,
-  manageResetPassword: false,
-  manageScim: false,
-};
 
 function toBoolean(value: unknown): boolean {
   return !!value;
@@ -81,7 +67,7 @@ export async function buildProfileOrganizations(
       if (!organization) return null;
 
       const membershipType = membershipTypeToResponse(membership.type, membership.accessAll);
-      const permissions = membershipType === 4 && membership.accessAll ? CUSTOM_ROLE_PERMISSIONS : null;
+      const permissions = resolveOrganizationPermissions(membership.type, membership.accessAll);
 
       return {
         id: organization.id,
@@ -131,6 +117,16 @@ export async function buildProfileOrganizations(
         userIsManagedByOrganization: false,
         userIsClaimedByOrganization: false,
         permissions,
+        canCreateNewCollections: permissions.createNewCollections,
+        canEditAnyCollection: permissions.editAnyCollection,
+        canDeleteAnyCollection: permissions.deleteAnyCollection,
+        canAccessEventLogs: permissions.accessEventLogs,
+        canAccessImportExport: permissions.accessImportExport,
+        canAccessReports: permissions.accessReports,
+        canManageGroups: permissions.manageGroups,
+        canManagePolicies: permissions.managePolicies,
+        canManageUsers: permissions.manageUsers || membershipType <= 1,
+        canManageUsersPassword: permissions.manageResetPassword,
         maxStorageGb: 32767,
         userId,
         key: membership.key,
@@ -333,7 +329,8 @@ export async function buildOrganizationMemberDetails(
     twoFactorEnabled: !!user?.totpSecret,
     resetPasswordEnrolled: false,
     hasMasterPassword: true,
-    permissions: membershipType === 4 && membership.accessAll ? CUSTOM_ROLE_PERMISSIONS : null,
+    permissions: resolveOrganizationPermissions(membership.type, membership.accessAll),
+    ssoExternalId: null,
     ssoBound: false,
     managedByOrganization: false,
     claimedByOrganization: false,
