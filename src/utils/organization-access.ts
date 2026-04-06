@@ -79,6 +79,13 @@ export async function buildProfileOrganizations(
 
       const membershipType = membershipTypeToResponse(membership.type, membership.accessAll);
       const permissions = resolveOrganizationPermissions(membership.type, membership.accessAll);
+      const isOwner = membershipType === 0;
+      const isAdmin = membershipType === 1;
+      const isManager = membershipType === 3 || membershipType === 4;
+      const isMember = Number(membership.status) === 2;
+      const canViewAllCollections = isOwner || isAdmin || membership.accessAll;
+      const canEditAllCiphers = isOwner || isAdmin || membership.accessAll;
+      const canDeleteAllCiphers = canEditAllCiphers;
 
       return {
         id: organization.id,
@@ -131,6 +138,9 @@ export async function buildProfileOrganizations(
         canCreateNewCollections: permissions.createNewCollections,
         canEditAnyCollection: permissions.editAnyCollection,
         canDeleteAnyCollection: permissions.deleteAnyCollection,
+        canViewAllCollections,
+        canEditAllCiphers,
+        canDeleteAllCiphers,
         canAccessEventLogs: permissions.accessEventLogs,
         canAccessImportExport: permissions.accessImportExport,
         canAccessReports: permissions.accessReports,
@@ -138,6 +148,17 @@ export async function buildProfileOrganizations(
         canManagePolicies: permissions.managePolicies,
         canManageUsers: permissions.manageUsers || membershipType <= 1,
         canManageUsersPassword: permissions.manageResetPassword,
+        canEditSubscription: isOwner,
+        canManageSponsorships: false,
+        isOwner,
+        isAdmin,
+        isManager,
+        isMember,
+        isProviderUser: false,
+        isAdminInitiated: false,
+        isFreeOrg: false,
+        hasProvider: false,
+        hasReseller: false,
         maxStorageGb: 32767,
         userId,
         key: membership.key,
