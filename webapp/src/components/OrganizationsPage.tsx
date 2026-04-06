@@ -137,6 +137,9 @@ export default function OrganizationsPage(props: OrganizationsPageProps) {
   const organizations = organizationsQuery.data || [];
   const collections = collectionDetailsQuery.data || [];
   const members = membersQuery.data || [];
+  const organizationsError = organizationsQuery.error instanceof Error ? organizationsQuery.error.message : '';
+  const collectionsError = collectionDetailsQuery.error instanceof Error ? collectionDetailsQuery.error.message : '';
+  const membersError = membersQuery.error instanceof Error ? membersQuery.error.message : '';
   const selectedOrganization = useMemo<OrganizationSummary | null>(
     () => organizations.find((entry) => entry.id === selectedOrganizationId) || null,
     [organizations, selectedOrganizationId]
@@ -146,9 +149,10 @@ export default function OrganizationsPage(props: OrganizationsPageProps) {
     [members, props.profile.id]
   );
 
-  const actorIsOwner = normalizeMemberRole(Number(currentMember?.type ?? 2)) === 0;
+  const currentMemberRole = normalizeMemberRole(Number(currentMember?.type ?? 2));
+  const actorIsOwner = currentMemberRole === 0;
   const actorCanManageMembers = !!currentMember && (
-    normalizeMemberRole(Number(currentMember.type)) <= 1 || Number(currentMember.type) === 4
+    currentMemberRole <= 1 || (currentMemberRole === 3 && !!currentMember.accessAll)
   );
   const ownerCount = members.filter(
     (entry) => Number(entry.status) === 2 && normalizeMemberRole(Number(entry.type)) === 0
@@ -439,6 +443,8 @@ export default function OrganizationsPage(props: OrganizationsPageProps) {
             </div>
             {organizationsQuery.isLoading ? (
               <div className="organization-empty">{t('txt_loading_nodewarden')}</div>
+            ) : organizationsError ? (
+              <div className="organization-empty">{organizationsError}</div>
             ) : organizations.length ? (
               <div className="organization-list">
                 {organizations.map((organization) => (
@@ -523,6 +529,8 @@ export default function OrganizationsPage(props: OrganizationsPageProps) {
             )}
             {selectedOrganization && collectionDetailsQuery.isLoading ? (
               <div className="organization-empty">{t('txt_loading_nodewarden')}</div>
+            ) : collectionsError ? (
+              <div className="organization-empty">{collectionsError}</div>
             ) : collections.length ? (
               <div className="organization-collection-grid">
                 {collections.map((collection) => (
@@ -557,6 +565,8 @@ export default function OrganizationsPage(props: OrganizationsPageProps) {
             <p className="organization-note">{t('txt_organization_member_invite_note')}</p>
             {selectedOrganization && membersQuery.isLoading ? (
               <div className="organization-empty">{t('txt_loading_nodewarden')}</div>
+            ) : membersError ? (
+              <div className="organization-empty">{membersError}</div>
             ) : members.length ? (
               <div className="organization-member-grid">
                 {members.map((member) => {
@@ -603,7 +613,7 @@ export default function OrganizationsPage(props: OrganizationsPageProps) {
 
                         <label className="field">
                           <span>{t('txt_access_scope')}</span>
-                          <label className="organization-check">
+                          <div className="organization-check">
                             <input
                               type="checkbox"
                               checked={!!draft?.accessAll}
@@ -611,7 +621,7 @@ export default function OrganizationsPage(props: OrganizationsPageProps) {
                               onInput={(event) => handleMemberAccessAllChange(member.id, (event.currentTarget as HTMLInputElement).checked)}
                             />
                             <span>{t('txt_access_all_collections')}</span>
-                          </label>
+                          </div>
                           <div className="field-help">
                             {draft?.accessAll || (draft?.type ?? 2) <= 1
                               ? t('txt_full_collection_access')
