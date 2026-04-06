@@ -69,10 +69,17 @@ import {
   handleGetOrganizationCollectionsDetails,
   handleGetOrganizationMember,
   handleGetOrganizationMemberMiniDetails,
+  handleGetOrganizationMemberResetPasswordDetails,
   handleGetOrganizationMembers,
   handleGetOrganizations,
   handleGetPlans,
+  handleBulkDeleteOrganizationMembers,
+  handleBulkRestoreOrganizationMembers,
+  handleBulkRevokeOrganizationMembers,
   handleDeleteOrganizationCollection,
+  handleDeleteOrganizationMember,
+  handleRestoreOrganizationMember,
+  handleRevokeOrganizationMember,
   handleUpdateOrganization,
   handleUpdateOrganizationCollection,
   handleUpdateOrganizationCollectionUsers,
@@ -291,6 +298,15 @@ export async function handleAuthenticatedRoute(
     if (subPath === '/users' && method === 'GET') {
       return handleGetOrganizationMembers(request, env, userId, organizationId);
     }
+    if (subPath === '/users' && method === 'DELETE') {
+      return handleBulkDeleteOrganizationMembers(request, env, userId, organizationId);
+    }
+    if (subPath === '/users/revoke' && (method === 'PUT' || method === 'POST')) {
+      return handleBulkRevokeOrganizationMembers(request, env, userId, organizationId);
+    }
+    if (subPath === '/users/restore' && (method === 'PUT' || method === 'POST')) {
+      return handleBulkRestoreOrganizationMembers(request, env, userId, organizationId);
+    }
     if (subPath === '/users/mini-details' && method === 'GET') {
       return handleGetOrganizationMemberMiniDetails(request, env, userId, organizationId);
     }
@@ -336,8 +352,26 @@ export async function handleAuthenticatedRoute(
       if (method === 'GET') {
         return handleGetOrganizationMember(request, env, userId, organizationId, memberMatch[1]);
       }
+      if (method === 'DELETE') {
+        return handleDeleteOrganizationMember(request, env, userId, organizationId, memberMatch[1]);
+      }
       if (method === 'PUT' || method === 'POST') {
         return handleUpdateOrganizationMember(request, env, userId, organizationId, memberMatch[1]);
+      }
+    }
+
+    const memberActionMatch = subPath.match(/^\/users\/([a-f0-9-]+)\/(revoke|restore|reset-password-details)$/i);
+    if (memberActionMatch) {
+      const memberId = memberActionMatch[1];
+      const action = memberActionMatch[2];
+      if (action === 'revoke' && (method === 'PUT' || method === 'POST')) {
+        return handleRevokeOrganizationMember(request, env, userId, organizationId, memberId);
+      }
+      if (action === 'restore' && (method === 'PUT' || method === 'POST')) {
+        return handleRestoreOrganizationMember(request, env, userId, organizationId, memberId);
+      }
+      if (action === 'reset-password-details' && method === 'GET') {
+        return handleGetOrganizationMemberResetPasswordDetails(request, env, userId, organizationId, memberId);
       }
     }
     return null;

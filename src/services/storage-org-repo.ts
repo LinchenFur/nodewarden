@@ -208,6 +208,10 @@ export async function saveOrganizationMembership(
     .run();
 }
 
+export async function deleteOrganizationMembership(db: D1Database, id: string): Promise<void> {
+  await db.prepare('DELETE FROM organization_memberships WHERE id = ?').bind(id).run();
+}
+
 export async function getOrgCollection(db: D1Database, id: string): Promise<OrgCollection | null> {
   const row = await db
     .prepare(

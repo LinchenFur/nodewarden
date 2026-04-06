@@ -108,6 +108,7 @@ async function buildOrganizationProfileResponse(
       billingEmail: organization.billingEmail,
       name: organization.name,
       hasPublicAndPrivateKeys: !!organization.privateKey && !!organization.publicKey,
+      object: 'organization',
     };
   }
 
@@ -275,6 +276,18 @@ function parseFullCollectionPayload(body: any): {
     externalId: normalizeOptionalString(body?.externalId),
     users: Array.isArray(body?.users) ? body.users : [],
   };
+}
+
+function buildBulkMembershipActionResponse(results: Array<{ id: string; error: string }>): Response {
+  return jsonResponse({
+    data: results.map((entry) => ({
+      object: 'OrganizationUserBulkResponseModel',
+      id: entry.id,
+      error: entry.error,
+    })),
+    object: 'list',
+    continuationToken: null,
+  });
 }
 
 export async function handleGetOrganizations(request: Request, env: Env, userId: string): Promise<Response> {
@@ -860,6 +873,41 @@ export async function handleGetOrganizationMember(
   return jsonResponse(await buildOrganizationMemberDetails(storage, target, true));
 }
 
+export async function handleGetOrganizationMemberResetPasswordDetails(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  memberId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const actor = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!actor || !isMembershipAtLeast(actor.type, 1)) {
+    return errorResponse('Organization not found', 404);
+  }
+
+  const target = await storage.getOrganizationMembershipById(memberId);
+  if (!target || target.organizationId !== organizationId) {
+    return errorResponse("The specified user isn't member of the organization", 404);
+  }
+
+  const organization = await storage.getOrganization(organizationId);
+  const user = await storage.getUserById(target.userId);
+  if (!organization || !user) return errorResponse('User not found', 404);
+
+  return jsonResponse({
+    object: 'organizationUserResetPasswordDetails',
+    organizationUserId: memberId,
+    kdf: user.kdfType,
+    kdfIterations: user.kdfIterations,
+    kdfMemory: user.kdfMemory ?? null,
+    kdfParallelism: user.kdfParallelism ?? null,
+    resetPasswordKey: null,
+    encryptedPrivateKey: organization.privateKey,
+  });
+}
+
 export async function handleUpdateOrganizationMember(
   request: Request,
   env: Env,
@@ -927,6 +975,195 @@ export async function handleUpdateOrganizationMember(
   await notifyOrganizationUsersSync(request, env, storage, organizationId);
 
   return new Response(null, { status: 200 });
+}
+
+export async function handleDeleteOrganizationMember(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  memberId: string
+): Promise<Response> {
+  const storage = new StorageService(env.DB);
+  const actor = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!actor || !isMembershipAtLeast(actor.type, 1)) {
+    return errorResponse('Organization not found', 404);
+  }
+
+  const target = await storage.getOrganizationMembershipById(memberId);
+  if (!target || target.organizationId !== organizationId) {
+    return errorResponse("User to delete isn't member of the organization", 404);
+  }
+
+  if (target.userId === userId) return errorResponse('You cannot delete yourself', 400);
+  if (normalizeOrganizationMembershipType(target.type) !== 2 && normalizeOrganizationMembershipType(actor.type) !== 0) {
+    return errorResponse('Only Owners can delete Admins or Owners', 403);
+  }
+  if (normalizeOrganizationMembershipType(target.type) === 0 && Number(target.status) === 2) {
+    const owners = (await storage.getOrganizationMembershipsByOrg(organizationId))
+      .filter((entry) => Number(entry.status) === 2 && normalizeOrganizationMembershipType(entry.type) === 0);
+    if (owners.length <= 1) return errorResponse("Can't delete the last owner", 400);
+  }
+
+  await storage.deleteOrganizationMembership(memberId);
+  await notifyOrganizationUsersSync(request, env, storage, organizationId);
+  return new Response(null, { status: 200 });
+}
+
+export async function handleBulkDeleteOrganizationMembers(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  let body: { ids?: string[] };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const results: Array<{ id: string; error: string }> = [];
+  for (const id of body.ids || []) {
+    const response = await handleDeleteOrganizationMember(request, env, userId, organizationId, String(id || ''));
+    let error = '';
+    if (!response.ok) {
+      const text = await response.text();
+      try {
+        const parsed = JSON.parse(text);
+        error = String(parsed?.error_description || parsed?.error || text || 'Delete failed');
+      } catch {
+        error = text || 'Delete failed';
+      }
+    }
+    results.push({ id: String(id || ''), error });
+  }
+  return buildBulkMembershipActionResponse(results);
+}
+
+export async function handleRevokeOrganizationMember(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  memberId: string
+): Promise<Response> {
+  const storage = new StorageService(env.DB);
+  const actor = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!actor || !isMembershipAtLeast(actor.type, 1)) {
+    return errorResponse('Organization not found', 404);
+  }
+
+  const target = await storage.getOrganizationMembershipById(memberId);
+  if (!target || target.organizationId !== organizationId) {
+    return errorResponse('User not found in organization', 404);
+  }
+  if (target.userId === userId) return errorResponse('You cannot revoke yourself', 400);
+  if (normalizeOrganizationMembershipType(target.type) === 0 && normalizeOrganizationMembershipType(actor.type) !== 0) {
+    return errorResponse('Only owners can revoke other owners', 403);
+  }
+  if (normalizeOrganizationMembershipType(target.type) === 0) {
+    const owners = (await storage.getOrganizationMembershipsByOrg(organizationId))
+      .filter((entry) => Number(entry.status) === 2 && normalizeOrganizationMembershipType(entry.type) === 0);
+    if (owners.length <= 1) return errorResponse('Organization must have at least one confirmed owner', 400);
+  }
+
+  target.status = -1;
+  target.updatedAt = new Date().toISOString();
+  await storage.saveOrganizationMembership(target);
+  await notifyOrganizationUsersSync(request, env, storage, organizationId);
+  return new Response(null, { status: 200 });
+}
+
+export async function handleBulkRevokeOrganizationMembers(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  let body: { ids?: string[] };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const results: Array<{ id: string; error: string }> = [];
+  for (const id of body.ids || []) {
+    const response = await handleRevokeOrganizationMember(request, env, userId, organizationId, String(id || ''));
+    let error = '';
+    if (!response.ok) {
+      const text = await response.text();
+      try {
+        const parsed = JSON.parse(text);
+        error = String(parsed?.error_description || parsed?.error || text || 'Revoke failed');
+      } catch {
+        error = text || 'Revoke failed';
+      }
+    }
+    results.push({ id: String(id || ''), error });
+  }
+  return buildBulkMembershipActionResponse(results);
+}
+
+export async function handleRestoreOrganizationMember(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  memberId: string
+): Promise<Response> {
+  const storage = new StorageService(env.DB);
+  const actor = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!actor || !isMembershipAtLeast(actor.type, 1)) {
+    return errorResponse('Organization not found', 404);
+  }
+
+  const target = await storage.getOrganizationMembershipById(memberId);
+  if (!target || target.organizationId !== organizationId) {
+    return errorResponse('User not found in organization', 404);
+  }
+  if (target.userId === userId) return errorResponse('You cannot restore yourself', 400);
+  if (normalizeOrganizationMembershipType(target.type) === 0 && normalizeOrganizationMembershipType(actor.type) !== 0) {
+    return errorResponse('Only owners can restore other owners', 403);
+  }
+
+  target.status = 2;
+  target.updatedAt = new Date().toISOString();
+  await storage.saveOrganizationMembership(target);
+  await notifyOrganizationUsersSync(request, env, storage, organizationId);
+  return new Response(null, { status: 200 });
+}
+
+export async function handleBulkRestoreOrganizationMembers(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  let body: { ids?: string[] };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const results: Array<{ id: string; error: string }> = [];
+  for (const id of body.ids || []) {
+    const response = await handleRestoreOrganizationMember(request, env, userId, organizationId, String(id || ''));
+    let error = '';
+    if (!response.ok) {
+      const text = await response.text();
+      try {
+        const parsed = JSON.parse(text);
+        error = String(parsed?.error_description || parsed?.error || text || 'Restore failed');
+      } catch {
+        error = text || 'Restore failed';
+      }
+    }
+    results.push({ id: String(id || ''), error });
+  }
+  return buildBulkMembershipActionResponse(results);
 }
 
 export async function handleGetOrganizationCipherDetails(
