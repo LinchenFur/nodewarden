@@ -65,6 +65,7 @@ import {
   handleGetOrganizationCollections,
   handleGetOrganizationCollectionsDetails,
   handleGetOrganizationMember,
+  handleGetOrganizationMemberMiniDetails,
   handleGetOrganizationMembers,
   handleGetOrganizations,
   handleDeleteOrganizationCollection,
@@ -281,6 +282,9 @@ export async function handleAuthenticatedRoute(
     }
     if (subPath === '/users' && method === 'GET') {
       return handleGetOrganizationMembers(request, env, userId, organizationId);
+    }
+    if (subPath === '/users/mini-details' && method === 'GET') {
+      return handleGetOrganizationMemberMiniDetails(request, env, userId, organizationId);
     }
 
     const collectionMatch = subPath.match(/^\/collections\/([a-f0-9-]+)(\/.*)?$/i);

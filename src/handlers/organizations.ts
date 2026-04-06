@@ -66,8 +66,12 @@ async function requireConfirmedMembership(
 function buildOrganizationResponse(organization: Organization): any {
   return {
     id: organization.id,
+    identifier: null,
     name: organization.name,
     billingEmail: organization.billingEmail,
+    seats: 20,
+    maxCollections: null,
+    usersGetPremium: true,
     useTotp: true,
     usePolicies: true,
     useGroups: false,
@@ -77,7 +81,42 @@ function buildOrganizationResponse(organization: Organization): any {
     useResetPassword: false,
     useSecretsManager: false,
     usePasswordManager: true,
+    useSso: false,
+    useScim: false,
+    use2fa: true,
+    useKeyConnector: false,
+    useCustomPermissions: true,
+    selfHost: true,
     hasPublicAndPrivateKeys: !!organization.privateKey && !!organization.publicKey,
+    productTierType: 3,
+    keyConnectorEnabled: false,
+    keyConnectorUrl: null,
+    object: 'organization',
+  };
+}
+
+async function buildOrganizationProfileResponse(
+  storage: StorageService,
+  userId: string,
+  organization: Organization
+): Promise<any> {
+  const organizations = await buildProfileOrganizations(storage, userId);
+  const match = organizations.find((entry) => entry.id === organization.id);
+  if (match) {
+    return {
+      ...match,
+      billingEmail: organization.billingEmail,
+      name: organization.name,
+      hasPublicAndPrivateKeys: !!organization.privateKey && !!organization.publicKey,
+    };
+  }
+
+  return {
+    ...buildOrganizationResponse(organization),
+    userId,
+    status: 2,
+    type: 0,
+    enabled: true,
     object: 'organization',
   };
 }
@@ -312,7 +351,7 @@ export async function handleCreateOrganization(request: Request, env: Env, userI
   await storage.saveOrgCollection(collection);
   await notifyOrganizationUsersSync(request, env, storage, organization.id);
 
-  return jsonResponse(buildOrganizationResponse(organization), 200);
+  return jsonResponse(await buildOrganizationProfileResponse(storage, userId, organization), 200);
 }
 
 export async function handleGetOrganization(
@@ -327,7 +366,7 @@ export async function handleGetOrganization(
   if (!membership) return errorResponse('Organization not found', 404);
   const organization = await storage.getOrganization(organizationId);
   if (!organization) return errorResponse('Organization not found', 404);
-  return jsonResponse(buildOrganizationResponse(organization));
+  return jsonResponse(await buildOrganizationProfileResponse(storage, userId, organization));
 }
 
 export async function handleUpdateOrganization(
@@ -360,7 +399,7 @@ export async function handleUpdateOrganization(
   organization.updatedAt = new Date().toISOString();
   await storage.saveOrganization(organization);
   await notifyOrganizationUsersSync(request, env, storage, organizationId);
-  return jsonResponse(buildOrganizationResponse(organization));
+  return jsonResponse(await buildOrganizationProfileResponse(storage, userId, organization));
 }
 
 export async function handleGetOrganizationPublicKey(
@@ -684,6 +723,30 @@ export async function handleGetOrganizationMembers(
   const data = [];
   for (const member of members) {
     data.push(await buildOrganizationMemberDetails(storage, member, includeCollections));
+  }
+
+  return jsonResponse({
+    data,
+    object: 'list',
+    continuationToken: null,
+  });
+}
+
+export async function handleGetOrganizationMemberMiniDetails(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+
+  const members = await storage.getOrganizationMembershipsByOrg(organizationId);
+  const data = [];
+  for (const member of members) {
+    data.push(await buildOrganizationMemberDetails(storage, member, false));
   }
 
   return jsonResponse({
