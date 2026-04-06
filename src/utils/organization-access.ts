@@ -7,11 +7,12 @@ import type {
 } from '../types';
 import { StorageService } from '../services/storage';
 import {
+  buildOrganizationPermissionsPayload,
   hasFullOrganizationAccess,
   isOrganizationManager,
   membershipTypeToResponse,
   mergeCollectionAccess,
-  resolveOrganizationPermissions,
+  withPascalCaseAliases,
 } from './organization-permissions';
 
 export interface OrganizationAccessSnapshot {
@@ -78,7 +79,7 @@ export async function buildProfileOrganizations(
       if (!organization) return null;
 
       const membershipType = membershipTypeToResponse(membership.type, membership.accessAll);
-      const permissions = resolveOrganizationPermissions(membership.type, membership.accessAll);
+      const permissions = buildOrganizationPermissionsPayload(membership.type, membership.accessAll);
       const isOwner = membershipType === 0;
       const isAdmin = membershipType === 1;
       const isManager = membershipType === 3 || membershipType === 4;
@@ -87,7 +88,7 @@ export async function buildProfileOrganizations(
       const canEditAllCiphers = isOwner || isAdmin || membership.accessAll;
       const canDeleteAllCiphers = canEditAllCiphers;
 
-      return {
+      return withPascalCaseAliases({
         id: organization.id,
         identifier: null,
         name: organization.name,
@@ -166,7 +167,7 @@ export async function buildProfileOrganizations(
         type: membershipType,
         enabled: true,
         object: 'profileOrganization',
-      };
+      });
     })
     .filter(Boolean);
 }
@@ -314,7 +315,7 @@ export async function buildCollectionDetails(
     }
   }
 
-  return withAliases({
+  return withPascalCaseAliases(withAliases({
     id: collection.id,
     organizationId: collection.organizationId,
     externalId: collection.externalId,
@@ -332,7 +333,7 @@ export async function buildCollectionDetails(
     hidePasswords: 'HidePasswords',
     manage: 'Manage',
     object: 'Object',
-  });
+  }));
 }
 
 export async function buildOrganizationMemberDetails(
@@ -347,7 +348,7 @@ export async function buildOrganizationMemberDetails(
   if (includeCollections && !hasFullOrganizationAccess(membership)) {
     const assignmentsByMembershipId = await storage.getCollectionMembershipsByMembershipIds([membership.id]);
     const assignments = assignmentsByMembershipId.get(membership.id) || [];
-    collections = assignments.map((assignment) => withAliases({
+    collections = assignments.map((assignment) => withPascalCaseAliases(withAliases({
       id: assignment.collectionId,
       readOnly: toBoolean(assignment.readOnly),
       hidePasswords: toBoolean(assignment.hidePasswords),
@@ -357,10 +358,10 @@ export async function buildOrganizationMemberDetails(
       readOnly: 'ReadOnly',
       hidePasswords: 'HidePasswords',
       manage: 'Manage',
-    }));
+    })));
   }
 
-  return withAliases({
+  return withPascalCaseAliases(withAliases({
     id: membership.id,
     userId: membership.userId,
     name: user?.name ?? null,
@@ -375,7 +376,7 @@ export async function buildOrganizationMemberDetails(
     twoFactorEnabled: !!user?.totpSecret,
     resetPasswordEnrolled: false,
     hasMasterPassword: true,
-    permissions: resolveOrganizationPermissions(membership.type, membership.accessAll),
+    permissions: buildOrganizationPermissionsPayload(membership.type, membership.accessAll),
     ssoExternalId: null,
     ssoBound: false,
     managedByOrganization: false,
@@ -406,5 +407,5 @@ export async function buildOrganizationMemberDetails(
     usesKeyConnector: 'UsesKeyConnector',
     accessSecretsManager: 'AccessSecretsManager',
     object: 'Object',
-  });
+  }));
 }

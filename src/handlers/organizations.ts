@@ -19,13 +19,14 @@ import {
   resolveCipherAccess,
 } from '../utils/organization-access';
 import {
+  buildOrganizationPermissionsPayload,
   hasFullOrganizationAccess,
   isMembershipAtLeast,
   isOrganizationManager,
   mergeCollectionAccess,
   membershipTypeToResponse,
   normalizeOrganizationMembershipType,
-  resolveOrganizationPermissions,
+  withPascalCaseAliases,
 } from '../utils/organization-permissions';
 import { cipherToResponse } from './ciphers';
 
@@ -76,8 +77,8 @@ async function requireConfirmedMembership(
 }
 
 function buildOrganizationResponse(organization: Organization): any {
-  const permissions = resolveOrganizationPermissions(0, true);
-  return {
+  const permissions = buildOrganizationPermissionsPayload(0, true);
+  return withPascalCaseAliases({
     id: organization.id,
     identifier: null,
     name: organization.name,
@@ -131,7 +132,7 @@ function buildOrganizationResponse(organization: Organization): any {
     hasReseller: false,
     allowAdminAccessToAllCollectionItems: true,
     object: 'organization',
-  };
+  });
 }
 
 async function buildOrganizationProfileResponse(
@@ -517,7 +518,7 @@ export async function handleGetOrganizationBillingMetadata(
   const occupiedSeats = (await storage.getOrganizationMembershipsByOrg(organizationId))
     .filter((entry) => Number(entry.status) === 2)
     .length;
-  return jsonResponse(withAliases({
+  return jsonResponse(withPascalCaseAliases(withAliases({
     organizationOccupiedSeats: occupiedSeats,
     isOnSecretsManagerStandalone: false,
     object: 'organizationBillingMetadata',
@@ -525,7 +526,7 @@ export async function handleGetOrganizationBillingMetadata(
     organizationOccupiedSeats: 'OrganizationOccupiedSeats',
     isOnSecretsManagerStandalone: 'IsOnSecretsManagerStandalone',
     object: 'Object',
-  }));
+  })));
 }
 
 export async function handleGetOrganizationBillingWarnings(
@@ -538,7 +539,7 @@ export async function handleGetOrganizationBillingWarnings(
   const storage = new StorageService(env.DB);
   const membership = await requireConfirmedMembership(storage, userId, organizationId);
   if (!membership) return errorResponse('Organization not found', 404);
-  return jsonResponse(withAliases({
+  return jsonResponse(withPascalCaseAliases(withAliases({
     freeTrial: null,
     inactiveSubscription: null,
     resellerRenewal: null,
@@ -548,7 +549,7 @@ export async function handleGetOrganizationBillingWarnings(
     inactiveSubscription: 'InactiveSubscription',
     resellerRenewal: 'ResellerRenewal',
     taxId: 'TaxId',
-  }));
+  })));
 }
 
 export async function handleGetCollections(request: Request, env: Env, userId: string): Promise<Response> {

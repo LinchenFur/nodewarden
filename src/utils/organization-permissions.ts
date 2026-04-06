@@ -26,6 +26,16 @@ export interface OrganizationPermissionsResponse {
   manageScim: boolean;
 }
 
+export function withPascalCaseAliases<T extends Record<string, any>>(value: T): T & Record<string, any> {
+  const response: Record<string, any> = { ...value };
+  for (const [key, currentValue] of Object.entries(value)) {
+    if (!key.length) continue;
+    const alias = key.charAt(0).toUpperCase() + key.slice(1);
+    response[alias] = currentValue;
+  }
+  return response as T & Record<string, any>;
+}
+
 const NO_ORGANIZATION_PERMISSIONS: OrganizationPermissionsResponse = {
   accessEventLogs: false,
   accessImportExport: false,
@@ -113,6 +123,13 @@ export function resolveOrganizationPermissions(
     return { ...MANAGER_ORGANIZATION_PERMISSIONS };
   }
   return { ...NO_ORGANIZATION_PERMISSIONS };
+}
+
+export function buildOrganizationPermissionsPayload(
+  type: number,
+  accessAll: boolean
+): OrganizationPermissionsResponse & Record<string, any> {
+  return withPascalCaseAliases(resolveOrganizationPermissions(type, accessAll));
 }
 
 export function isConfirmedMembership(membership: Pick<OrganizationMembership, 'status'> | null | undefined): boolean {
