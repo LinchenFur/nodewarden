@@ -78,13 +78,23 @@ async function requireConfirmedMembership(
 
 function buildOrganizationResponse(organization: Organization): any {
   const permissions = buildOrganizationPermissionsPayload(0, true);
+  const hasPublicAndPrivateKeys = !!organization.privateKey && !!organization.publicKey;
   return withPascalCaseAliases({
     id: organization.id,
     identifier: null,
     name: organization.name,
     billingEmail: organization.billingEmail,
+    businessName: organization.name,
+    businessAddress1: null,
+    businessAddress2: null,
+    businessAddress3: null,
+    businessCountry: null,
+    businessTaxNumber: null,
     seats: 20,
     maxCollections: null,
+    maxAutoscaleSeats: null,
+    maxAutoscaleSmSeats: null,
+    maxAutoscaleSmServiceAccounts: null,
     usersGetPremium: true,
     useTotp: true,
     usePolicies: true,
@@ -101,10 +111,15 @@ function buildOrganizationResponse(organization: Organization): any {
     useKeyConnector: false,
     useCustomPermissions: true,
     selfHost: true,
-    hasPublicAndPrivateKeys: !!organization.privateKey && !!organization.publicKey,
+    hasPublicAndPrivateKeys,
+    planType: 6,
+    secretsManagerPlan: null,
+    smSeats: null,
+    smServiceAccounts: null,
     productTierType: 3,
     keyConnectorEnabled: false,
     keyConnectorUrl: null,
+    maxStorageGb: 32767,
     permissions,
     canCreateNewCollections: permissions.createNewCollections,
     canEditAnyCollection: permissions.editAnyCollection,
@@ -130,6 +145,9 @@ function buildOrganizationResponse(organization: Organization): any {
     isFreeOrg: false,
     hasProvider: false,
     hasReseller: false,
+    limitCollectionCreation: true,
+    limitCollectionDeletion: true,
+    limitItemDeletion: false,
     allowAdminAccessToAllCollectionItems: true,
     object: 'organization',
   });
@@ -143,23 +161,23 @@ async function buildOrganizationProfileResponse(
   const organizations = await buildProfileOrganizations(storage, userId);
   const match = organizations.find((entry) => entry.id === organization.id);
   if (match) {
-    return {
+    return withPascalCaseAliases({
       ...match,
       billingEmail: organization.billingEmail,
       name: organization.name,
       hasPublicAndPrivateKeys: !!organization.privateKey && !!organization.publicKey,
       object: 'organization',
-    };
+    });
   }
 
-  return {
+  return withPascalCaseAliases({
     ...buildOrganizationResponse(organization),
     userId,
     status: 2,
     type: 0,
     enabled: true,
     object: 'organization',
-  };
+  });
 }
 
 function parseMemberCollectionAssignments(

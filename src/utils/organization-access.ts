@@ -87,13 +87,24 @@ export async function buildProfileOrganizations(
       const canViewAllCollections = isOwner || isAdmin || membership.accessAll;
       const canEditAllCiphers = isOwner || isAdmin || membership.accessAll;
       const canDeleteAllCiphers = canEditAllCiphers;
+      const hasPublicAndPrivateKeys = !!organization.privateKey && !!organization.publicKey;
 
       return withPascalCaseAliases({
         id: organization.id,
         identifier: null,
         name: organization.name,
+        billingEmail: organization.billingEmail,
+        businessName: organization.name,
+        businessAddress1: null,
+        businessAddress2: null,
+        businessAddress3: null,
+        businessCountry: null,
+        businessTaxNumber: null,
         seats: 20,
         maxCollections: null,
+        maxAutoscaleSeats: null,
+        maxAutoscaleSmSeats: null,
+        maxAutoscaleSmServiceAccounts: null,
         usersGetPremium: true,
         use2fa: true,
         useDirectory: false,
@@ -104,7 +115,7 @@ export async function buildProfileOrganizations(
         usePolicies: true,
         useApi: true,
         selfHost: true,
-        hasPublicAndPrivateKeys: !!organization.privateKey && !!organization.publicKey,
+        hasPublicAndPrivateKeys,
         resetPasswordEnrolled: false,
         useResetPassword: false,
         ssoBound: false,
@@ -116,6 +127,10 @@ export async function buildProfileOrganizations(
         useActivateAutofillPolicy: false,
         useAdminSponsoredFamilies: false,
         useRiskInsights: false,
+        planType: 6,
+        secretsManagerPlan: null,
+        smSeats: null,
+        smServiceAccounts: null,
         organizationUserId: membership.id,
         providerId: null,
         providerName: null,
