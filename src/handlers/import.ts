@@ -24,7 +24,6 @@ interface CiphersImportRequest {
       password?: string | null;
       totp?: string | null;
       autofillOnPageLoad?: boolean | null;
-      fido2Credentials?: any[] | null;
       uri?: string | null;
       passwordRevisionDate?: string | null;
       [key: string]: any;
@@ -159,7 +158,7 @@ export async function handleCiphersImport(request: Request, env: Env, userId: st
   const cipherMapRows: Array<{ index: number; sourceId: string | null; id: string }> = [];
   for (let i = 0; i < ciphers.length; i++) {
     const c = ciphers[i];
-    const folderId = cipherFolderMap.get(i) || null;
+    const folderId = cipherFolderMap.get(i) || c.folderId || null;
     const sourceIdRaw = String(c?.id ?? '').trim();
     const sourceId = sourceIdRaw || null;
 
@@ -184,7 +183,6 @@ export async function handleCiphersImport(request: Request, env: Env, userId: st
         })) || null,
         totp: c.login.totp ?? null,
         autofillOnPageLoad: c.login.autofillOnPageLoad ?? null,
-        fido2Credentials: c.login.fido2Credentials ?? null,
         uri: c.login.uri ?? null,
         passwordRevisionDate: c.login.passwordRevisionDate ?? null,
       } : null,

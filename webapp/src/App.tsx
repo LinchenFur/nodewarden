@@ -691,9 +691,6 @@ export default function App() {
                 decUsername: await decryptField(cipher.login.username || '', itemEnc, itemMac),
                 decPassword: await decryptField(cipher.login.password || '', itemEnc, itemMac),
                 decTotp: await decryptField(cipher.login.totp || '', itemEnc, itemMac),
-                fido2Credentials: Array.isArray(cipher.login.fido2Credentials)
-                  ? cipher.login.fido2Credentials.map((credential) => ({ ...credential }))
-                  : null,
                 uris: await Promise.all(
                   (cipher.login.uris || []).map(async (u) => ({
                     ...u,
@@ -1116,6 +1113,7 @@ export default function App() {
     onBulkMoveVaultItems: vaultSendActions.bulkMoveVaultItems,
     onVerifyMasterPassword: vaultSendActions.verifyMasterPassword,
     onCreateFolder: vaultSendActions.createFolder,
+    onRenameFolder: vaultSendActions.renameFolder,
     onDeleteFolder: vaultSendActions.deleteFolder,
     onBulkDeleteFolders: vaultSendActions.bulkDeleteFolders,
     onDownloadVaultAttachment: vaultSendActions.downloadVaultAttachment,

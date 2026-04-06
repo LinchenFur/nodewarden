@@ -359,3 +359,4 @@ export async function performUnlock(
   }
   return { ...refreshedSession, ...keys };
 }
+

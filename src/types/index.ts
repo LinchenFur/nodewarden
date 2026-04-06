@@ -94,7 +94,6 @@ export interface CipherLogin {
   uris: CipherLoginUri[] | null;
   totp: string | null;
   autofillOnPageLoad: boolean | null;
-  fido2Credentials: any[] | null;
   uri: string | null;
   passwordRevisionDate: string | null;
 }
@@ -367,6 +366,10 @@ export interface TokenResponse {
   accountKeys?: any | null;
   UserDecryptionOptions: UserDecryptionOptions;
   userDecryptionOptions?: UserDecryptionOptions;
+  VaultKeys?: {
+    symEncKey: string;
+    symMacKey: string;
+  };
 }
 
 export interface ProfileResponse {
