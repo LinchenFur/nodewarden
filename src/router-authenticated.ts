@@ -58,11 +58,15 @@ import {
   handleCreateOrganization,
   handleGetCollections,
   handleGetOrganization,
+  handleGetOrganizationCollectionDetails,
+  handleGetOrganizationCollectionUsers,
   handleGetOrganizationCipherDetails,
   handleGetOrganizationCollections,
   handleGetOrganizationCollectionsDetails,
+  handleGetOrganizationMember,
   handleGetOrganizationMembers,
   handleGetOrganizations,
+  handleUpdateOrganizationCollectionUsers,
   handleUpdateOrganizationMember,
   handleCreateOrganizationCollection,
 } from './handlers/organizations';
@@ -269,9 +273,29 @@ export async function handleAuthenticatedRoute(
       return handleGetOrganizationMembers(request, env, userId, organizationId);
     }
 
+    const collectionMatch = subPath.match(/^\/collections\/([a-f0-9-]+)(\/.*)?$/i);
+    if (collectionMatch) {
+      const collectionId = collectionMatch[1];
+      const collectionSubPath = collectionMatch[2] || '';
+      if (collectionSubPath === '/details' && method === 'GET') {
+        return handleGetOrganizationCollectionDetails(request, env, userId, organizationId, collectionId);
+      }
+      if (collectionSubPath === '/users' && method === 'GET') {
+        return handleGetOrganizationCollectionUsers(request, env, userId, organizationId, collectionId);
+      }
+      if (collectionSubPath === '/users' && (method === 'PUT' || method === 'POST')) {
+        return handleUpdateOrganizationCollectionUsers(request, env, userId, organizationId, collectionId);
+      }
+    }
+
     const memberMatch = subPath.match(/^\/users\/([a-f0-9-]+)$/i);
-    if (memberMatch && (method === 'PUT' || method === 'POST')) {
-      return handleUpdateOrganizationMember(request, env, userId, organizationId, memberMatch[1]);
+    if (memberMatch) {
+      if (method === 'GET') {
+        return handleGetOrganizationMember(request, env, userId, organizationId, memberMatch[1]);
+      }
+      if (method === 'PUT' || method === 'POST') {
+        return handleUpdateOrganizationMember(request, env, userId, organizationId, memberMatch[1]);
+      }
     }
     return null;
   }

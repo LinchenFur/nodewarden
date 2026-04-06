@@ -21,6 +21,8 @@ import {
 import {
   hasFullOrganizationAccess,
   isMembershipAtLeast,
+  isOrganizationManager,
+  mergeCollectionAccess,
   membershipTypeToResponse,
   normalizeOrganizationMembershipType,
 } from '../utils/organization-permissions';
@@ -101,6 +103,127 @@ function parseMemberCollectionAssignments(
       } satisfies CollectionMembership;
     })
     .filter(Boolean) as CollectionMembership[];
+}
+
+async function buildCollectionAccessDetailsResponse(
+  storage: StorageService,
+  userId: string,
+  organizationId: string,
+  collection: OrgCollection
+): Promise<any> {
+  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
+  const membershipsByOrg = await storage.getOrganizationMembershipsByOrg(organizationId);
+  const assignmentsByCollectionId = await storage.getCollectionMembershipsByCollectionIds([collection.id]);
+  const base = await buildCollectionDetails(storage, userId, collection, snapshot);
+  const users = [];
+
+  for (const member of membershipsByOrg) {
+    if (Number(member.status) !== 2) continue;
+    if (hasFullOrganizationAccess(member)) {
+      users.push({
+        id: member.id,
+        readOnly: false,
+        hidePasswords: false,
+        manage: true,
+      });
+      continue;
+    }
+
+    const assignment = (assignmentsByCollectionId.get(collection.id) || []).find((entry) => entry.membershipId === member.id);
+    if (!assignment) continue;
+
+    users.push({
+      id: member.id,
+      readOnly: assignment.readOnly,
+      hidePasswords: assignment.hidePasswords,
+      manage: assignment.manage || membershipTypeToResponse(member.type, member.accessAll) === 4,
+    });
+  }
+
+  return {
+    ...base,
+    assigned: true,
+    users,
+    groups: [],
+    unmanaged: false,
+    object: 'collectionAccessDetails',
+  };
+}
+
+async function requireCollectionAccessContext(
+  storage: StorageService,
+  userId: string,
+  organizationId: string,
+  collectionId: string
+): Promise<{
+  membership: OrganizationMembership;
+  collection: OrgCollection;
+  matchedAssignments: CollectionMembership[];
+  canManage: boolean;
+} | null> {
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return null;
+
+  const collection = await storage.getOrgCollection(collectionId);
+  if (!collection || collection.organizationId !== organizationId) {
+    return null;
+  }
+
+  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
+  const matchedAssignments = (snapshot.assignmentsByMembershipId.get(membership.id) || [])
+    .filter((assignment) => assignment.collectionId === collectionId);
+
+  if (!hasFullOrganizationAccess(membership) && !matchedAssignments.length) {
+    return null;
+  }
+
+  const merged = mergeCollectionAccess(matchedAssignments, isOrganizationManager(membership));
+  const canManage = hasFullOrganizationAccess(membership) || merged.manage;
+
+  return {
+    membership,
+    collection,
+    matchedAssignments,
+    canManage,
+  };
+}
+
+async function buildCollectionUsersResponse(
+  storage: StorageService,
+  organizationId: string,
+  collectionId: string
+): Promise<any[]> {
+  const assignmentsByCollectionId = await storage.getCollectionMembershipsByCollectionIds([collectionId]);
+  const assignmentsByMembershipId = new Map(
+    (assignmentsByCollectionId.get(collectionId) || []).map((assignment) => [assignment.membershipId, assignment])
+  );
+  const members = await storage.getOrganizationMembershipsByOrg(organizationId);
+  const data = [];
+
+  for (const member of members) {
+    if (Number(member.status) !== 2) continue;
+
+    const membershipType = membershipTypeToResponse(member.type, member.accessAll);
+    const assignment = assignmentsByMembershipId.get(member.id);
+    if (!hasFullOrganizationAccess(member) && !assignment) continue;
+
+    const user = await storage.getUserById(member.userId);
+    data.push({
+      id: member.id,
+      organizationUserId: member.id,
+      name: user?.name ?? null,
+      email: member.userEmail,
+      status: member.status,
+      type: membershipType,
+      accessAll: member.accessAll,
+      readOnly: assignment ? assignment.readOnly : false,
+      hidePasswords: assignment ? assignment.hidePasswords : false,
+      manage: assignment ? assignment.manage || membershipType === 4 : true,
+      object: 'collectionUserDetails',
+    });
+  }
+
+  return data;
 }
 
 export async function handleGetOrganizations(request: Request, env: Env, userId: string): Promise<Response> {
@@ -258,45 +381,100 @@ export async function handleGetOrganizationCollectionsDetails(
 
   const details = [];
   for (const collection of collections) {
-    const base = await buildCollectionDetails(storage, userId, collection, snapshot);
     const assigned = hasFullOrganizationAccess(membership)
       || (snapshot.assignmentsByMembershipId.get(membership.id) || []).some((assignment) => assignment.collectionId === collection.id);
     if (!assigned) continue;
-
-    const users = [];
-    for (const member of membershipsByOrg) {
-      if (Number(member.status) !== 2) continue;
-      if (hasFullOrganizationAccess(member)) {
-        users.push({
-          id: member.id,
-          readOnly: false,
-          hidePasswords: false,
-          manage: true,
-        });
-        continue;
-      }
-      const assignment = (assignmentsByCollectionId.get(collection.id) || []).find((entry) => entry.membershipId === member.id);
-      if (!assignment) continue;
-      users.push({
-        id: member.id,
-        readOnly: assignment.readOnly,
-        hidePasswords: assignment.hidePasswords,
-        manage: assignment.manage || membershipTypeToResponse(member.type, member.accessAll) === 4,
-      });
-    }
-
-    details.push({
-      ...base,
-      assigned: true,
-      users,
-      groups: [],
-      unmanaged: false,
-      object: 'collectionAccessDetails',
-    });
+    void membershipsByOrg;
+    void assignmentsByCollectionId;
+    details.push(await buildCollectionAccessDetailsResponse(storage, userId, organizationId, collection));
   }
 
   return jsonResponse({
     data: details,
+    object: 'list',
+    continuationToken: null,
+  });
+}
+
+export async function handleGetOrganizationCollectionDetails(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  collectionId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const context = await requireCollectionAccessContext(storage, userId, organizationId, collectionId);
+  if (!context) return errorResponse('Collection not found', 404);
+  return jsonResponse(await buildCollectionAccessDetailsResponse(storage, userId, organizationId, context.collection));
+}
+
+export async function handleGetOrganizationCollectionUsers(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  collectionId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const context = await requireCollectionAccessContext(storage, userId, organizationId, collectionId);
+  if (!context) return errorResponse('Collection not found', 404);
+
+  return jsonResponse({
+    data: await buildCollectionUsersResponse(storage, organizationId, collectionId),
+    object: 'list',
+    continuationToken: null,
+  });
+}
+
+export async function handleUpdateOrganizationCollectionUsers(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  collectionId: string
+): Promise<Response> {
+  const storage = new StorageService(env.DB);
+  const context = await requireCollectionAccessContext(storage, userId, organizationId, collectionId);
+  if (!context) return errorResponse('Collection not found', 404);
+  if (!context.canManage) return errorResponse('Insufficient permissions', 403);
+
+  let body: {
+    users?: Array<{ id?: string; readOnly?: boolean; hidePasswords?: boolean; manage?: boolean }>;
+  } | Array<{ id?: string; readOnly?: boolean; hidePasswords?: boolean; manage?: boolean }>;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const userAssignments = Array.isArray(body) ? body : body.users || [];
+  const organizationMembers = await storage.getOrganizationMembershipsByOrg(organizationId);
+  const membershipIds = new Set(organizationMembers.map((entry) => entry.id));
+  const now = new Date().toISOString();
+  const assignments: CollectionMembership[] = [];
+
+  for (const userAssignment of userAssignments) {
+    const memberId = normalizeOptionalString(userAssignment?.id);
+    if (!memberId || !membershipIds.has(memberId)) continue;
+    assignments.push({
+      collectionId,
+      membershipId: memberId,
+      readOnly: getBoolean(userAssignment.readOnly),
+      hidePasswords: getBoolean(userAssignment.hidePasswords),
+      manage: getBoolean(userAssignment.manage),
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  await storage.replaceCollectionMemberships(collectionId, assignments);
+  await notifyOrganizationUsersSync(request, env, storage, organizationId);
+
+  return jsonResponse({
+    data: await buildCollectionUsersResponse(storage, organizationId, collectionId),
     object: 'list',
     continuationToken: null,
   });
@@ -386,6 +564,26 @@ export async function handleGetOrganizationMembers(
     object: 'list',
     continuationToken: null,
   });
+}
+
+export async function handleGetOrganizationMember(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  memberId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+
+  const target = await storage.getOrganizationMembershipById(memberId);
+  if (!target || target.organizationId !== organizationId) {
+    return errorResponse("The specified user isn't member of the organization", 404);
+  }
+
+  return jsonResponse(await buildOrganizationMemberDetails(storage, target, true));
 }
 
 export async function handleUpdateOrganizationMember(
