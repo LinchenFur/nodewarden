@@ -60,12 +60,16 @@ import {
   handleGetOrganization,
   handleGetOrganizationCollectionDetails,
   handleGetOrganizationCollectionUsers,
+  handleGetOrganizationPublicKey,
   handleGetOrganizationCipherDetails,
   handleGetOrganizationCollections,
   handleGetOrganizationCollectionsDetails,
   handleGetOrganizationMember,
   handleGetOrganizationMembers,
   handleGetOrganizations,
+  handleDeleteOrganizationCollection,
+  handleUpdateOrganization,
+  handleUpdateOrganizationCollection,
   handleUpdateOrganizationCollectionUsers,
   handleUpdateOrganizationMember,
   handleCreateOrganizationCollection,
@@ -260,6 +264,12 @@ export async function handleAuthenticatedRoute(
     if ((subPath === '' || subPath === '/') && method === 'GET') {
       return handleGetOrganization(request, env, userId, organizationId);
     }
+    if ((subPath === '' || subPath === '/') && (method === 'PUT' || method === 'POST')) {
+      return handleUpdateOrganization(request, env, userId, organizationId);
+    }
+    if ((subPath === '/public-key' || subPath === '/keys') && method === 'GET') {
+      return handleGetOrganizationPublicKey(request, env, userId, organizationId);
+    }
     if (subPath === '/collections' && method === 'GET') {
       return handleGetOrganizationCollections(request, env, userId, organizationId);
     }
@@ -277,6 +287,15 @@ export async function handleAuthenticatedRoute(
     if (collectionMatch) {
       const collectionId = collectionMatch[1];
       const collectionSubPath = collectionMatch[2] || '';
+      if ((collectionSubPath === '' || collectionSubPath === '/') && (method === 'PUT' || method === 'POST')) {
+        return handleUpdateOrganizationCollection(request, env, userId, organizationId, collectionId);
+      }
+      if ((collectionSubPath === '' || collectionSubPath === '/') && method === 'DELETE') {
+        return handleDeleteOrganizationCollection(request, env, userId, organizationId, collectionId);
+      }
+      if (collectionSubPath === '/delete' && method === 'POST') {
+        return handleDeleteOrganizationCollection(request, env, userId, organizationId, collectionId);
+      }
       if (collectionSubPath === '/details' && method === 'GET') {
         return handleGetOrganizationCollectionDetails(request, env, userId, organizationId, collectionId);
       }

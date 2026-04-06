@@ -77,6 +77,7 @@ import {
   getConfirmedOrganizationMemberUserIds as listStoredConfirmedOrganizationMemberUserIds,
   saveOrganizationMembership as saveStoredOrganizationMembership,
   getOrgCollection as findStoredOrgCollection,
+  deleteOrgCollection as deleteStoredOrgCollection,
   saveOrgCollection as saveStoredOrgCollection,
   getCollectionsByOrganization as listStoredCollectionsByOrganization,
   getCollectionsByUser as listStoredCollectionsByUser,
@@ -444,6 +445,10 @@ export class StorageService {
 
   async saveOrgCollection(collection: OrgCollection): Promise<void> {
     await saveStoredOrgCollection(this.db, collection);
+  }
+
+  async deleteOrgCollection(id: string): Promise<void> {
+    await deleteStoredOrgCollection(this.db, id);
   }
 
   async getCollectionsByOrganization(organizationId: string): Promise<OrgCollection[]> {

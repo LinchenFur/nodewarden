@@ -226,6 +226,18 @@ async function buildCollectionUsersResponse(
   return data;
 }
 
+function parseFullCollectionPayload(body: any): {
+  name: string | null;
+  externalId: string | null;
+  users: Array<{ id?: string; readOnly?: boolean; hidePasswords?: boolean; manage?: boolean }>;
+} {
+  return {
+    name: normalizeOptionalString(body?.name),
+    externalId: normalizeOptionalString(body?.externalId),
+    users: Array.isArray(body?.users) ? body.users : [],
+  };
+}
+
 export async function handleGetOrganizations(request: Request, env: Env, userId: string): Promise<Response> {
   void request;
   const storage = new StorageService(env.DB);
@@ -316,6 +328,57 @@ export async function handleGetOrganization(
   const organization = await storage.getOrganization(organizationId);
   if (!organization) return errorResponse('Organization not found', 404);
   return jsonResponse(buildOrganizationResponse(organization));
+}
+
+export async function handleUpdateOrganization(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership || normalizeOrganizationMembershipType(membership.type) !== 0) {
+    return errorResponse('Organization not found', 404);
+  }
+
+  const organization = await storage.getOrganization(organizationId);
+  if (!organization) return errorResponse('Organization not found', 404);
+
+  let body: { name?: string; billingEmail?: string | null };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const name = normalizeOptionalString(body.name);
+  if (!name) return errorResponse('Organization name is required', 400);
+
+  organization.name = name;
+  organization.billingEmail = normalizeOptionalString(body.billingEmail);
+  organization.updatedAt = new Date().toISOString();
+  await storage.saveOrganization(organization);
+  await notifyOrganizationUsersSync(request, env, storage, organizationId);
+  return jsonResponse(buildOrganizationResponse(organization));
+}
+
+export async function handleGetOrganizationPublicKey(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string
+): Promise<Response> {
+  void request;
+  const storage = new StorageService(env.DB);
+  const membership = await requireConfirmedMembership(storage, userId, organizationId);
+  if (!membership) return errorResponse('Organization not found', 404);
+  const organization = await storage.getOrganization(organizationId);
+  if (!organization) return errorResponse('Organization not found', 404);
+  return jsonResponse({
+    object: 'organizationPublicKey',
+    publicKey: organization.publicKey,
+  });
 }
 
 export async function handleGetCollections(request: Request, env: Env, userId: string): Promise<Response> {
@@ -422,11 +485,7 @@ export async function handleGetOrganizationCollectionUsers(
   const context = await requireCollectionAccessContext(storage, userId, organizationId, collectionId);
   if (!context) return errorResponse('Collection not found', 404);
 
-  return jsonResponse({
-    data: await buildCollectionUsersResponse(storage, organizationId, collectionId),
-    object: 'list',
-    continuationToken: null,
-  });
+  return jsonResponse(await buildCollectionUsersResponse(storage, organizationId, collectionId));
 }
 
 export async function handleUpdateOrganizationCollectionUsers(
@@ -493,26 +552,22 @@ export async function handleCreateOrganizationCollection(
     return errorResponse("You don't have permission to create collections", 403);
   }
 
-  let body: {
-    name?: string;
-    externalId?: string | null;
-    users?: Array<{ id?: string; readOnly?: boolean; hidePasswords?: boolean; manage?: boolean }>;
-  };
+  let body: any;
   try {
     body = await request.json();
   } catch {
     return errorResponse('Invalid JSON', 400);
   }
 
-  const name = normalizeOptionalString(body.name);
-  if (!name) return errorResponse('Collection name is required', 400);
+  const payload = parseFullCollectionPayload(body);
+  if (!payload.name) return errorResponse('Collection name is required', 400);
 
   const now = new Date().toISOString();
   const collection: OrgCollection = {
     id: generateUUID(),
     organizationId,
-    name,
-    externalId: normalizeOptionalString(body.externalId),
+    name: payload.name,
+    externalId: payload.externalId,
     createdAt: now,
     updatedAt: now,
   };
@@ -520,9 +575,11 @@ export async function handleCreateOrganizationCollection(
   await storage.saveOrgCollection(collection);
   const memberIds = new Set((await storage.getOrganizationMembershipsByOrg(organizationId)).map((entry) => entry.id));
   const assignments: CollectionMembership[] = [];
-  for (const userAssignment of body.users || []) {
+  for (const userAssignment of payload.users) {
     const memberId = normalizeOptionalString(userAssignment?.id);
     if (!memberId || !memberIds.has(memberId)) continue;
+    const member = await storage.getOrganizationMembershipById(memberId);
+    if (!member || member.accessAll || hasFullOrganizationAccess(member)) continue;
     assignments.push({
       collectionId: collection.id,
       membershipId: memberId,
@@ -538,6 +595,76 @@ export async function handleCreateOrganizationCollection(
 
   const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
   return jsonResponse(await buildCollectionDetails(storage, userId, collection, snapshot), 200);
+}
+
+export async function handleUpdateOrganizationCollection(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  collectionId: string
+): Promise<Response> {
+  const storage = new StorageService(env.DB);
+  const context = await requireCollectionAccessContext(storage, userId, organizationId, collectionId);
+  if (!context || !context.canManage) return errorResponse('Collection not found', 404);
+
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const payload = parseFullCollectionPayload(body);
+  if (!payload.name) return errorResponse('Collection name is required', 400);
+
+  const collection = context.collection;
+  const now = new Date().toISOString();
+  collection.name = payload.name;
+  collection.externalId = payload.externalId;
+  collection.updatedAt = now;
+  await storage.saveOrgCollection(collection);
+
+  const organizationMembers = await storage.getOrganizationMembershipsByOrg(organizationId);
+  const membershipIds = new Set(organizationMembers.map((entry) => entry.id));
+  const assignments: CollectionMembership[] = [];
+  for (const userAssignment of payload.users) {
+    const memberId = normalizeOptionalString(userAssignment?.id);
+    if (!memberId || !membershipIds.has(memberId)) continue;
+    const member = organizationMembers.find((entry) => entry.id === memberId) || null;
+    if (!member || member.accessAll || hasFullOrganizationAccess(member)) continue;
+    assignments.push({
+      collectionId,
+      membershipId: memberId,
+      readOnly: getBoolean(userAssignment.readOnly),
+      hidePasswords: getBoolean(userAssignment.hidePasswords),
+      manage: getBoolean(userAssignment.manage),
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  await storage.replaceCollectionMemberships(collectionId, assignments);
+  await notifyOrganizationUsersSync(request, env, storage, organizationId);
+
+  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
+  return jsonResponse(await buildCollectionDetails(storage, userId, collection, snapshot));
+}
+
+export async function handleDeleteOrganizationCollection(
+  request: Request,
+  env: Env,
+  userId: string,
+  organizationId: string,
+  collectionId: string
+): Promise<Response> {
+  const storage = new StorageService(env.DB);
+  const context = await requireCollectionAccessContext(storage, userId, organizationId, collectionId);
+  if (!context || !context.canManage) return errorResponse('Collection not found', 404);
+
+  await storage.deleteOrgCollection(collectionId);
+  await notifyOrganizationUsersSync(request, env, storage, organizationId);
+  return new Response(null, { status: 200 });
 }
 
 export async function handleGetOrganizationMembers(

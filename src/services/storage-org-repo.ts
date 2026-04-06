@@ -236,6 +236,10 @@ export async function saveOrgCollection(db: D1Database, collection: OrgCollectio
     .run();
 }
 
+export async function deleteOrgCollection(db: D1Database, id: string): Promise<void> {
+  await db.prepare('DELETE FROM org_collections WHERE id = ?').bind(id).run();
+}
+
 export async function getCollectionsByOrganization(db: D1Database, organizationId: string): Promise<OrgCollection[]> {
   const res = await db
     .prepare(
