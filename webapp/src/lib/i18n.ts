@@ -1555,6 +1555,13 @@ messages.en.txt_status_accepted = 'Accepted';
 messages.en.txt_status_confirmed = 'Confirmed';
 messages.en.txt_saving = 'Saving...';
 messages.en.txt_creating = 'Creating...';
+messages.en.txt_page_runtime_error = 'This page hit a runtime error';
+messages.en.txt_page_runtime_error_help = 'The browser caught an unexpected client-side exception while rendering this screen.';
+messages.en.txt_organizations_page_error = 'Organizations page crashed';
+messages.en.txt_organizations_page_error_help = 'The organizations page threw an unexpected error. The message below will help us pinpoint the next fix.';
+messages.en.txt_error_message = 'Error message';
+messages.en.txt_error_stack_preview = 'Stack preview';
+messages.en.txt_retry = 'Retry';
 
 zhCNOverrides.txt_import = '导入';
 zhCNOverrides.txt_export = '导出';
@@ -1690,6 +1697,13 @@ zhCNOverrides.txt_status_accepted = '已接受';
 zhCNOverrides.txt_status_confirmed = '已确认';
 zhCNOverrides.txt_saving = '保存中...';
 zhCNOverrides.txt_creating = '创建中...';
+zhCNOverrides.txt_page_runtime_error = '这个页面发生了运行时错误';
+zhCNOverrides.txt_page_runtime_error_help = '浏览器在渲染这个页面时捕获到了未预期的前端异常。';
+zhCNOverrides.txt_organizations_page_error = '组织页面崩溃了';
+zhCNOverrides.txt_organizations_page_error_help = '组织页面抛出了未预期错误。下面的错误信息可以帮助我们继续精确修复。';
+zhCNOverrides.txt_error_message = '错误信息';
+zhCNOverrides.txt_error_stack_preview = '堆栈预览';
+zhCNOverrides.txt_retry = '重试';
 
 messages['zh-CN'] = { ...messages.en, ...zhCNOverrides };
 

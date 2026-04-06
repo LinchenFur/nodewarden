@@ -186,6 +186,32 @@ export default function App() {
   }, [pushToast]);
 
   useEffect(() => {
+    const handleWindowError = (event: ErrorEvent) => {
+      const message = String(event.error?.message || event.message || '').trim();
+      if (!message) return;
+      pushToast('error', message);
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      const message = typeof reason === 'string'
+        ? reason
+        : reason instanceof Error
+          ? reason.message
+          : String(reason || '').trim();
+      if (!message) return;
+      pushToast('error', message);
+    };
+
+    window.addEventListener('error', handleWindowError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    return () => {
+      window.removeEventListener('error', handleWindowError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, [pushToast]);
+
+  useEffect(() => {
     const syncInviteFromUrl = () => {
       setInviteCodeFromUrl(readInviteCodeFromUrl());
     };

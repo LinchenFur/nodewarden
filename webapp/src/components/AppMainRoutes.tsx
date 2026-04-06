@@ -9,6 +9,7 @@ import type { CiphersImportPayload } from '@/lib/api/vault';
 import { t } from '@/lib/i18n';
 import type { AdminInvite, AdminUser, AuthorizedDevice, Cipher, Folder as VaultFolder, Profile, Send, SendDraft, SessionState, VaultDraft } from '@/lib/types';
 import type { ExportRequest } from '@/lib/export-formats';
+import RouteErrorBoundary from '@/components/RouteErrorBoundary';
 
 const SendsPage = lazy(() => import('@/components/SendsPage'));
 const TotpCodesPage = lazy(() => import('@/components/TotpCodesPage'));
@@ -218,13 +219,19 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
                 </button>
               </div>
             )}
-            <Suspense fallback={<RouteContentFallback />}>
-              <OrganizationsPage
-                profile={props.profile}
-                authedFetch={props.authedFetch}
-                onNotify={props.onNotify}
-              />
-            </Suspense>
+            <RouteErrorBoundary
+              resetKey={`${props.profile.id}:${props.mobileLayout ? 'm' : 'd'}`}
+              title={t('txt_organizations_page_error')}
+              description={t('txt_organizations_page_error_help')}
+            >
+              <Suspense fallback={<RouteContentFallback />}>
+                <OrganizationsPage
+                  profile={props.profile}
+                  authedFetch={props.authedFetch}
+                  onNotify={props.onNotify}
+                />
+              </Suspense>
+            </RouteErrorBoundary>
           </div>
         )}
       </Route>

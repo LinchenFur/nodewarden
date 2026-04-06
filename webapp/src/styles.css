@@ -3185,6 +3185,51 @@ input[type='file'].input::file-selector-button:hover {
   flex-wrap: wrap;
 }
 
+.route-error-card {
+  border-color: rgba(217, 45, 87, 0.22);
+}
+
+.route-error-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--danger);
+  margin-bottom: 8px;
+}
+
+.route-error-copy {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.route-error-block {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: var(--panel-soft);
+  margin-bottom: 12px;
+}
+
+.route-error-label {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.route-error-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .restore-progress-card {
   margin: 8px 0 12px;
   padding: 14px 16px;
