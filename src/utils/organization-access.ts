@@ -33,6 +33,17 @@ function toBoolean(value: unknown): boolean {
   return !!value;
 }
 
+function withAliases<T extends Record<string, any>>(
+  value: T,
+  aliases: Record<string, string>
+): T & Record<string, any> {
+  const response: Record<string, any> = { ...value };
+  for (const [sourceKey, aliasKey] of Object.entries(aliases)) {
+    response[aliasKey] = value[sourceKey];
+  }
+  return response as T & Record<string, any>;
+}
+
 export async function loadOrganizationAccessSnapshot(
   storage: StorageService,
   userId: string
@@ -282,7 +293,7 @@ export async function buildCollectionDetails(
     }
   }
 
-  return {
+  return withAliases({
     id: collection.id,
     organizationId: collection.organizationId,
     externalId: collection.externalId,
@@ -291,7 +302,16 @@ export async function buildCollectionDetails(
     hidePasswords,
     manage,
     object: 'collectionDetails',
-  };
+  }, {
+    id: 'Id',
+    organizationId: 'OrganizationId',
+    externalId: 'ExternalId',
+    name: 'Name',
+    readOnly: 'ReadOnly',
+    hidePasswords: 'HidePasswords',
+    manage: 'Manage',
+    object: 'Object',
+  });
 }
 
 export async function buildOrganizationMemberDetails(
@@ -306,15 +326,20 @@ export async function buildOrganizationMemberDetails(
   if (includeCollections && !hasFullOrganizationAccess(membership)) {
     const assignmentsByMembershipId = await storage.getCollectionMembershipsByMembershipIds([membership.id]);
     const assignments = assignmentsByMembershipId.get(membership.id) || [];
-    collections = assignments.map((assignment) => ({
+    collections = assignments.map((assignment) => withAliases({
       id: assignment.collectionId,
       readOnly: toBoolean(assignment.readOnly),
       hidePasswords: toBoolean(assignment.hidePasswords),
       manage: toBoolean(assignment.manage) || (membershipType === 4 && !assignment.readOnly && !assignment.hidePasswords),
+    }, {
+      id: 'Id',
+      readOnly: 'ReadOnly',
+      hidePasswords: 'HidePasswords',
+      manage: 'Manage',
     }));
   }
 
-  return {
+  return withAliases({
     id: membership.id,
     userId: membership.userId,
     name: user?.name ?? null,
@@ -337,5 +362,28 @@ export async function buildOrganizationMemberDetails(
     usesKeyConnector: false,
     accessSecretsManager: false,
     object: 'organizationUserUserDetails',
-  };
+  }, {
+    id: 'Id',
+    userId: 'UserId',
+    name: 'Name',
+    email: 'Email',
+    externalId: 'ExternalId',
+    avatarColor: 'AvatarColor',
+    groups: 'Groups',
+    collections: 'Collections',
+    status: 'Status',
+    type: 'Type',
+    accessAll: 'AccessAll',
+    twoFactorEnabled: 'TwoFactorEnabled',
+    resetPasswordEnrolled: 'ResetPasswordEnrolled',
+    hasMasterPassword: 'HasMasterPassword',
+    permissions: 'Permissions',
+    ssoExternalId: 'SsoExternalId',
+    ssoBound: 'SsoBound',
+    managedByOrganization: 'ManagedByOrganization',
+    claimedByOrganization: 'ClaimedByOrganization',
+    usesKeyConnector: 'UsesKeyConnector',
+    accessSecretsManager: 'AccessSecretsManager',
+    object: 'Object',
+  });
 }

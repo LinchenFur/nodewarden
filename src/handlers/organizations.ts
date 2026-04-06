@@ -39,6 +39,17 @@ function normalizeOptionalString(value: unknown): string | null {
   return normalized ? normalized : null;
 }
 
+function withAliases<T extends Record<string, any>>(
+  value: T,
+  aliases: Record<string, string>
+): T & Record<string, any> {
+  const response: Record<string, any> = { ...value };
+  for (const [sourceKey, aliasKey] of Object.entries(aliases)) {
+    response[aliasKey] = value[sourceKey];
+  }
+  return response as T & Record<string, any>;
+}
+
 async function notifyOrganizationUsersSync(
   request: Request,
   env: Env,
@@ -489,11 +500,18 @@ export async function handleGetOrganizationBillingMetadata(
   const storage = new StorageService(env.DB);
   const membership = await requireConfirmedMembership(storage, userId, organizationId);
   if (!membership) return errorResponse('Organization not found', 404);
-  return jsonResponse({
-    object: 'list',
-    data: [],
-    continuationToken: null,
-  });
+  const occupiedSeats = (await storage.getOrganizationMembershipsByOrg(organizationId))
+    .filter((entry) => Number(entry.status) === 2)
+    .length;
+  return jsonResponse(withAliases({
+    organizationOccupiedSeats: occupiedSeats,
+    isOnSecretsManagerStandalone: false,
+    object: 'organizationBillingMetadata',
+  }, {
+    organizationOccupiedSeats: 'OrganizationOccupiedSeats',
+    isOnSecretsManagerStandalone: 'IsOnSecretsManagerStandalone',
+    object: 'Object',
+  }));
 }
 
 export async function handleGetOrganizationBillingWarnings(
@@ -506,26 +524,33 @@ export async function handleGetOrganizationBillingWarnings(
   const storage = new StorageService(env.DB);
   const membership = await requireConfirmedMembership(storage, userId, organizationId);
   if (!membership) return errorResponse('Organization not found', 404);
-  return jsonResponse({
+  return jsonResponse(withAliases({
     freeTrial: null,
     inactiveSubscription: null,
     resellerRenewal: null,
     taxId: null,
-  });
+  }, {
+    freeTrial: 'FreeTrial',
+    inactiveSubscription: 'InactiveSubscription',
+    resellerRenewal: 'ResellerRenewal',
+    taxId: 'TaxId',
+  }));
 }
 
 export async function handleGetCollections(request: Request, env: Env, userId: string): Promise<Response> {
-  void request;
   const storage = new StorageService(env.DB);
-  const collections = await storage.getCollectionsByUser(userId);
+  const url = new URL(request.url);
+  const organizationId = normalizeOptionalString(url.searchParams.get('organizationId'));
+  let collections = await storage.getCollectionsByUser(userId);
+  if (organizationId) {
+    collections = collections.filter((collection) => collection.organizationId === organizationId);
+  }
+
+  const snapshot = await loadOrganizationAccessSnapshot(storage, userId);
   return jsonResponse({
-    data: collections.map((collection) => ({
-      id: collection.id,
-      organizationId: collection.organizationId,
-      externalId: collection.externalId,
-      name: collection.name,
-      object: 'collection',
-    })),
+    data: await Promise.all(
+      collections.map((collection) => buildCollectionDetails(storage, userId, collection, snapshot))
+    ),
     object: 'list',
     continuationToken: null,
   });
@@ -547,13 +572,9 @@ export async function handleGetOrganizationCollections(
 
   const collections = await storage.getCollectionsByOrganization(organizationId);
   return jsonResponse({
-    data: collections.map((collection) => ({
-      id: collection.id,
-      organizationId: collection.organizationId,
-      externalId: collection.externalId,
-      name: collection.name,
-      object: 'collection',
-    })),
+    data: await Promise.all(
+      collections.map((collection) => buildCollectionDetails(storage, userId, collection))
+    ),
     object: 'list',
     continuationToken: null,
   });
