@@ -2,7 +2,6 @@ import { base64ToBytes, decryptBw, decryptBwFileData, decryptStr, encryptBw, enc
 import type {
   Cipher,
   Folder,
-  ListResponse,
   SessionState,
   VaultDraft,
   VaultDraftField,
@@ -16,12 +15,11 @@ import {
   type AuthedFetch,
 } from './shared';
 import { readResponseBytesWithProgress } from '../download';
+import { loadVaultSyncSnapshot } from './vault-sync';
 
 export async function getFolders(authedFetch: AuthedFetch): Promise<Folder[]> {
-  const resp = await authedFetch('/api/folders');
-  if (!resp.ok) throw new Error('Failed to load folders');
-  const body = await parseJson<ListResponse<Folder>>(resp);
-  return body?.data || [];
+  const body = await loadVaultSyncSnapshot(authedFetch);
+  return body.folders || [];
 }
 
 export async function createFolder(
@@ -93,10 +91,8 @@ export async function updateFolder(
 }
 
 export async function getCiphers(authedFetch: AuthedFetch): Promise<Cipher[]> {
-  const resp = await authedFetch('/api/ciphers?deleted=true');
-  if (!resp.ok) throw new Error('Failed to load ciphers');
-  const body = await parseJson<ListResponse<Cipher>>(resp);
-  return body?.data || [];
+  const body = await loadVaultSyncSnapshot(authedFetch);
+  return body.ciphers || [];
 }
 
 export interface CiphersImportPayload {
@@ -240,6 +236,7 @@ export async function uploadCipherAttachment(
   const attachmentId = String(meta.attachmentId || '').trim();
   const uploadUrl = String(meta.url || '').trim();
   if (!attachmentId || !uploadUrl) throw new Error('Create attachment failed');
+  if (!session.accessToken) throw new Error('Unauthorized');
 
   const payload = new ArrayBuffer(encryptedBytes.byteLength);
   new Uint8Array(payload).set(encryptedBytes);
@@ -392,6 +389,56 @@ function toIsoDateOrNow(value: unknown): string {
   return parsed.toISOString();
 }
 
+async function encryptMaybeFidoValue(
+  value: unknown,
+  enc: Uint8Array,
+  mac: Uint8Array,
+  fallback = ''
+): Promise<string> {
+  const normalized = String(value ?? '').trim() || fallback;
+  if (looksLikeCipherString(normalized)) return normalized;
+  return encryptBw(new TextEncoder().encode(normalized), enc, mac);
+}
+
+async function encryptMaybeNullableFidoValue(
+  value: unknown,
+  enc: Uint8Array,
+  mac: Uint8Array
+): Promise<string | null> {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return null;
+  if (looksLikeCipherString(normalized)) return normalized;
+  return encryptBw(new TextEncoder().encode(normalized), enc, mac);
+}
+
+async function normalizeFido2Credentials(
+  credentials: Array<Record<string, unknown>> | null | undefined,
+  enc: Uint8Array,
+  mac: Uint8Array
+): Promise<Array<Record<string, unknown>> | null> {
+  if (!Array.isArray(credentials) || credentials.length === 0) return null;
+  const out: Array<Record<string, unknown>> = [];
+  for (const credential of credentials) {
+    if (!credential || typeof credential !== 'object') continue;
+    out.push({
+      credentialId: await encryptMaybeFidoValue(credential.credentialId, enc, mac),
+      keyType: await encryptMaybeFidoValue(credential.keyType, enc, mac, 'public-key'),
+      keyAlgorithm: await encryptMaybeFidoValue(credential.keyAlgorithm, enc, mac, 'ECDSA'),
+      keyCurve: await encryptMaybeFidoValue(credential.keyCurve, enc, mac, 'P-256'),
+      keyValue: await encryptMaybeFidoValue(credential.keyValue, enc, mac),
+      rpId: await encryptMaybeFidoValue(credential.rpId, enc, mac),
+      rpName: await encryptMaybeNullableFidoValue(credential.rpName, enc, mac),
+      userHandle: await encryptMaybeNullableFidoValue(credential.userHandle, enc, mac),
+      userName: await encryptMaybeNullableFidoValue(credential.userName, enc, mac),
+      userDisplayName: await encryptMaybeNullableFidoValue(credential.userDisplayName, enc, mac),
+      counter: await encryptMaybeFidoValue(credential.counter, enc, mac, '0'),
+      discoverable: await encryptMaybeFidoValue(credential.discoverable, enc, mac, 'false'),
+      creationDate: toIsoDateOrNow(credential.creationDate),
+    });
+  }
+  return out.length ? out : null;
+}
+
 async function getCipherKeys(
   cipher: Cipher | null,
   userEnc: Uint8Array,
@@ -440,10 +487,15 @@ async function buildCipherPayload(
   }
 
   if (type === 1) {
+    const existingFido2 =
+      cipher?.login && Array.isArray((cipher.login as any).fido2Credentials)
+        ? (cipher.login as any).fido2Credentials
+        : draft.loginFido2Credentials;
     payload.login = {
       username: await encryptTextValue(draft.loginUsername, keys.enc, keys.mac),
       password: await encryptTextValue(draft.loginPassword, keys.enc, keys.mac),
       totp: await encryptTextValue(draft.loginTotp, keys.enc, keys.mac),
+      fido2Credentials: await normalizeFido2Credentials(existingFido2, keys.enc, keys.mac),
       uris: await encryptUris(draft.loginUris || [], keys.enc, keys.mac),
     };
   } else if (type === 3) {

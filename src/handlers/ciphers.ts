@@ -63,11 +63,10 @@ function normalizeCipherForStorage(cipher: Cipher): Cipher {
 
 export function normalizeCipherLoginForStorage(login: any): any {
   if (!login || typeof login !== 'object') return login ?? null;
-
-  const rest = { ...login };
-  const passkeyField = ['f', 'i', 'd', 'o', '2', 'C', 'r', 'e', 'd', 'e', 'n', 't', 'i', 'a', 'l', 's'].join('');
-  delete (rest as Record<string, unknown>)[passkeyField];
-  return rest;
+  return {
+    ...login,
+    fido2Credentials: Array.isArray(login.fido2Credentials) ? login.fido2Credentials : null,
+  };
 }
 
 export function normalizeCipherLoginForCompatibility(login: any): any {
@@ -179,10 +178,12 @@ export async function handleGetCiphers(request: Request, env: Env, userId: strin
       : ciphers.filter(c => !c.deletedAt);
   }
 
-  const attachmentsByCipher = await storage.getAttachmentsByUserId(userId);
+  const attachmentsByCipher = await storage.getAttachmentsByCipherIds(
+    filteredCiphers.map((cipher) => cipher.id)
+  );
 
-  // Get attachments for all ciphers
-  const cipherResponses = [];
+  // Build responses only for the current page to keep pagination cheap.
+  const cipherResponses: CipherResponse[] = [];
   for (const cipher of filteredCiphers) {
     const attachments = attachmentsByCipher.get(cipher.id) || [];
     cipherResponses.push(cipherToResponse(cipher, attachments));

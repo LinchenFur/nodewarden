@@ -10,8 +10,12 @@ import JwtWarningPage from '@/components/JwtWarningPage';
 import {
   createAuthedFetch,
   getAuthorizedDevices,
+  clearProfileSnapshot,
   getCurrentDeviceIdentifier,
   getPasswordHint,
+  loadProfileSnapshot,
+  saveProfileSnapshot,
+  revokeCurrentSession,
   getTotpStatus,
   saveSession,
 } from '@/lib/api/auth';
@@ -39,6 +43,7 @@ import {
   performRecoverTwoFactorLogin,
   performRegistration,
   performTotpLogin,
+  hydrateLockedSession,
   performUnlock,
   type JwtUnsafeReason,
   type PendingTotp,
@@ -52,6 +57,17 @@ import { t } from '@/lib/i18n';
 import { APP_NOTIFY_EVENT, type AppNotifyDetail } from '@/lib/app-notify';
 import { dispatchBackupProgress, type BackupProgressDetail } from '@/lib/backup-restore-progress';
 import type { AppPhase, Cipher, Folder as VaultFolder, Profile, Send, SessionState } from '@/lib/types';
+
+function isBackupProgressDetail(value: unknown): value is BackupProgressDetail {
+  if (!value || typeof value !== 'object') return false;
+  const detail = value as Record<string, unknown>;
+  const operation = detail.operation;
+  return (
+    (operation === 'backup-restore' || operation === 'backup-export' || operation === 'backup-remote-run')
+    && typeof detail.step === 'string'
+    && typeof detail.fileName === 'string'
+  );
+}
 
 const IMPORT_ROUTE = '/backup/import-export';
 const IMPORT_ROUTE_PATHS = [IMPORT_ROUTE, '/tools/import', '/tools/import-export', '/tools/import-data', '/import', '/import-export'] as const;
@@ -124,11 +140,12 @@ function resolveSystemTheme(): 'light' | 'dark' {
 export default function App() {
   const initialBootstrap = useMemo(() => readInitialAppBootstrapState(), []);
   const initialInviteCode = useMemo(() => readInviteCodeFromUrl(), []);
+  const initialProfileSnapshot = useMemo(() => loadProfileSnapshot(initialBootstrap.session?.email), [initialBootstrap]);
   const [pendingAuthAction, setPendingAuthAction] = useState<'login' | 'register' | 'unlock' | null>(null);
   const [location, navigate] = useLocation();
   const [phase, setPhase] = useState<AppPhase>(initialBootstrap.phase);
   const [session, setSessionState] = useState<SessionState | null>(initialBootstrap.session);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(initialProfileSnapshot);
   const [defaultKdfIterations, setDefaultKdfIterations] = useState(initialBootstrap.defaultKdfIterations);
   const [jwtWarning, setJwtWarning] = useState<{ reason: JwtUnsafeReason; minLength: number } | null>(initialBootstrap.jwtWarning);
 
@@ -155,12 +172,15 @@ export default function App() {
   const [pendingTotp, setPendingTotp] = useState<PendingTotp | null>(null);
   const [totpCode, setTotpCode] = useState('');
   const [rememberDevice, setRememberDevice] = useState(true);
+  const [totpSubmitting, setTotpSubmitting] = useState(false);
 
   const [disableTotpOpen, setDisableTotpOpen] = useState(false);
   const [disableTotpPassword, setDisableTotpPassword] = useState('');
+  const [disableTotpSubmitting, setDisableTotpSubmitting] = useState(false);
   const [recoverValues, setRecoverValues] = useState({ email: '', password: '', recoveryCode: '' });
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => readThemePreference());
   const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(() => resolveSystemTheme());
+  const [unlockPreparing, setUnlockPreparing] = useState(() => initialBootstrap.phase === 'locked' && !initialProfileSnapshot?.key);
 
   const [confirm, setConfirm] = useState<AppConfirmState | null>(null);
   const [mobileLayout, setMobileLayout] = useState(false);
@@ -262,6 +282,16 @@ export default function App() {
     window.localStorage.setItem(THEME_STORAGE_KEY, themePreference);
   }, [themePreference]);
 
+  useEffect(() => {
+    saveProfileSnapshot(profile);
+  }, [profile]);
+
+  useEffect(() => {
+    if (phase === 'locked' && profile?.key && session) {
+      setUnlockPreparing(false);
+    }
+  }, [phase, profile, session]);
+
   useEffect(() => installMagneticUiFeedback(), []);
 
   function handleToggleTheme() {
@@ -323,6 +353,7 @@ export default function App() {
       setSession(boot.session);
       setProfile(boot.profile);
       setPhase(boot.phase);
+      setUnlockPreparing(boot.phase === 'locked' && !boot.profile?.key);
     })();
 
     return () => {
@@ -330,9 +361,34 @@ export default function App() {
     };
   }, [initialBootstrap]);
 
+  useEffect(() => {
+    if (phase !== 'locked' || !session) return;
+    let cancelled = false;
+    void (async () => {
+      const result = await hydrateLockedSession(session, profile);
+      if (cancelled) return;
+      if (!result.session) {
+        setSession(null);
+        setProfile(null);
+        setUnlockPreparing(false);
+        setPhase('login');
+        if (location !== '/login') navigate('/login');
+        return;
+      }
+      setSession(result.session);
+      if (result.profile) {
+        setProfile(result.profile);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, session?.email, location, navigate]);
+
   async function finalizeLogin(login: CompletedLogin) {
     setSession(login.session);
     setProfile(login.profile);
+    setUnlockPreparing(false);
     setPendingTotp(null);
     setTotpCode('');
     setPhase('app');
@@ -379,16 +435,20 @@ export default function App() {
   }
 
   async function handleTotpVerify() {
+    if (totpSubmitting) return;
     if (!pendingTotp) return;
     if (!totpCode.trim()) {
       pushToast('error', t('txt_please_input_totp_code'));
       return;
     }
+    setTotpSubmitting(true);
     try {
       const login = await performTotpLogin(pendingTotp, totpCode, rememberDevice);
       await finalizeLogin(login);
     } catch (error) {
       pushToast('error', error instanceof Error ? error.message : t('txt_totp_verify_failed'));
+    } finally {
+      setTotpSubmitting(false);
     }
   }
 
@@ -517,6 +577,7 @@ export default function App() {
       const nextSession = await performUnlock(session, profile, unlockPassword, defaultKdfIterations);
       setSession(nextSession);
       setUnlockPassword('');
+      setUnlockPreparing(false);
       setPhase('app');
       if (location === '/' || location === '/lock') navigate('/vault');
       pushToast('success', t('txt_unlocked'));
@@ -533,14 +594,18 @@ export default function App() {
     delete nextSession.symEncKey;
     delete nextSession.symMacKey;
     setSession(nextSession);
+    setUnlockPreparing(false);
     setPhase('locked');
     navigate('/lock');
   }
 
   function logoutNow() {
+    void revokeCurrentSession(sessionRef.current);
     setConfirm(null);
     setSession(null);
+    clearProfileSnapshot();
     setProfile(null);
+    setUnlockPreparing(false);
     setPendingTotp(null);
     setPhase('login');
     navigate('/login');
@@ -572,11 +637,13 @@ export default function App() {
         onConfirmTotp={() => {}}
         onCancelTotp={() => {}}
         onUseRecoveryCode={() => {}}
+        totpSubmitting={false}
         disableTotpOpen={false}
         disableTotpPassword=""
         onDisableTotpPasswordChange={() => {}}
         onConfirmDisableTotp={() => {}}
         onCancelDisableTotp={() => {}}
+        disableTotpSubmitting={false}
       />
     );
   }
@@ -871,9 +938,11 @@ export default function App() {
 
     const connect = () => {
       if (disposed) return;
+      const accessToken = session.accessToken;
+      if (!accessToken) return;
       try {
         const hubUrl = new URL('/notifications/hub', window.location.origin);
-        hubUrl.searchParams.set('access_token', session.accessToken);
+        hubUrl.searchParams.set('access_token', accessToken);
         hubUrl.protocol = hubUrl.protocol === 'https:' ? 'wss:' : 'ws:';
         socket = new WebSocket(hubUrl.toString());
       } catch {
@@ -927,17 +996,7 @@ export default function App() {
           }
           if (updateType === SIGNALR_UPDATE_TYPE_BACKUP_RESTORE_PROGRESS) {
             const payload = frame.arguments?.[0]?.Payload;
-            if (
-              payload
-              && typeof payload === 'object'
-              && (
-                payload.operation === 'backup-restore'
-                || payload.operation === 'backup-export'
-                || payload.operation === 'backup-remote-run'
-              )
-            ) {
-              dispatchBackupProgress(payload as BackupProgressDetail);
-            }
+            if (isBackupProgressDetail(payload)) dispatchBackupProgress(payload);
             continue;
           }
           if (updateType !== SIGNALR_UPDATE_TYPE_SYNC_VAULT) continue;
@@ -1197,7 +1256,8 @@ export default function App() {
         <AuthViews
           mode={phase}
           pendingAction={pendingAuthAction}
-          unlockReady={!!profile}
+          unlockReady={!!profile?.key && !!session}
+          unlockPreparing={unlockPreparing}
           loginValues={loginValues}
           registerValues={registerValues}
           unlockPassword={unlockPassword}
@@ -1236,21 +1296,25 @@ export default function App() {
           onRememberDeviceChange={setRememberDevice}
           onConfirmTotp={() => void handleTotpVerify()}
           onCancelTotp={() => {
+            if (totpSubmitting) return;
             setPendingTotp(null);
             setTotpCode('');
             setRememberDevice(true);
           }}
           onUseRecoveryCode={() => {
+            if (totpSubmitting) return;
             setPendingTotp(null);
             setTotpCode('');
             setRememberDevice(true);
             navigate('/recover-2fa');
           }}
+          totpSubmitting={totpSubmitting}
           disableTotpOpen={false}
           disableTotpPassword=""
           onDisableTotpPasswordChange={() => {}}
           onConfirmDisableTotp={() => {}}
           onCancelDisableTotp={() => {}}
+          disableTotpSubmitting={false}
         />
       </>
     );
@@ -1289,14 +1353,27 @@ export default function App() {
         onConfirmTotp={() => {}}
         onCancelTotp={() => {}}
         onUseRecoveryCode={() => {}}
+        totpSubmitting={false}
         disableTotpOpen={disableTotpOpen}
         disableTotpPassword={disableTotpPassword}
         onDisableTotpPasswordChange={setDisableTotpPassword}
-        onConfirmDisableTotp={() => void accountSecurityActions.disableTotp()}
+        onConfirmDisableTotp={() => {
+          if (disableTotpSubmitting) return;
+          void (async () => {
+            setDisableTotpSubmitting(true);
+            try {
+              await accountSecurityActions.disableTotp();
+            } finally {
+              setDisableTotpSubmitting(false);
+            }
+          })();
+        }}
         onCancelDisableTotp={() => {
+          if (disableTotpSubmitting) return;
           setDisableTotpOpen(false);
           setDisableTotpPassword('');
         }}
+        disableTotpSubmitting={disableTotpSubmitting}
       />
     </>
   );
