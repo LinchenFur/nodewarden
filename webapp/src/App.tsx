@@ -766,6 +766,14 @@ export default function App() {
                 ),
               };
             }
+            if (Array.isArray(cipher.passwordHistory)) {
+              nextCipher.passwordHistory = await Promise.all(
+                cipher.passwordHistory.map(async (entry) => ({
+                  ...entry,
+                  decPassword: await decryptField(entry?.password || '', itemEnc, itemMac),
+                }))
+              );
+            }
             if (cipher.card) {
               nextCipher.card = {
                 ...cipher.card,
@@ -1195,7 +1203,10 @@ export default function App() {
     },
     onOpenDisableTotp: () => setDisableTotpOpen(true),
     onGetRecoveryCode: accountSecurityActions.getRecoveryCode,
+    onGetApiKey: accountSecurityActions.getApiKey,
+    onRotateApiKey: accountSecurityActions.rotateApiKey,
     onRefreshAuthorizedDevices: accountSecurityActions.refreshAuthorizedDevices,
+    onRenameAuthorizedDevice: accountSecurityActions.renameAuthorizedDevice,
     onRevokeDeviceTrust: accountSecurityActions.openRevokeDeviceTrust,
     onRemoveDevice: accountSecurityActions.openRemoveDevice,
     onRevokeAllDeviceTrust: accountSecurityActions.openRevokeAllDeviceTrust,

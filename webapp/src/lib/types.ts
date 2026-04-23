@@ -29,13 +29,18 @@ export interface Folder {
 
 export interface CipherLoginUri {
   uri?: string | null;
+  uriChecksum?: string | null;
   match?: number | null;
+  response?: unknown | null;
   decUri?: string;
+  [key: string]: unknown;
 }
 
 export interface VaultDraftLoginUri {
   uri: string;
   match: number | null;
+  originalUri?: string;
+  extra?: Record<string, unknown>;
 }
 
 export interface CipherAttachment {
@@ -60,9 +65,14 @@ export interface CipherLogin {
   totp?: string | null;
   uris?: CipherLoginUri[] | null;
   fido2Credentials?: CipherLoginPasskey[] | null;
+  autofillOnPageLoad?: boolean | null;
+  uri?: string | null;
+  passwordRevisionDate?: string | null;
+  response?: unknown | null;
   decUsername?: string;
   decPassword?: string;
   decTotp?: string;
+  [key: string]: unknown;
 }
 
 export interface CipherCard {
@@ -138,6 +148,12 @@ export interface CipherField {
   decValue?: string;
 }
 
+export interface CipherPasswordHistoryEntry {
+  password?: string | null;
+  lastUsedDate?: string | null;
+  decPassword?: string;
+}
+
 export interface Cipher {
   id: string;
   type: number;
@@ -157,7 +173,7 @@ export interface Cipher {
   identity?: CipherIdentity | null;
   sshKey?: CipherSshKey | null;
   secureNote?: { type?: number | null } | null;
-  passwordHistory?: Array<{ password?: string | null; lastUsedDate?: string | null }> | null;
+  passwordHistory?: CipherPasswordHistoryEntry[] | null;
   fields?: CipherField[] | null;
   decName?: string;
   decNotes?: string;
@@ -328,10 +344,14 @@ export interface AdminInvite {
 export interface AuthorizedDevice {
   id: string;
   name: string;
+  systemName?: string | null;
+  deviceNote?: string | null;
   identifier: string;
   type: number;
   creationDate: string | null;
   revisionDate: string | null;
+  lastSeenAt?: string | null;
+  hasStoredDevice?: boolean;
   online: boolean;
   trusted: boolean;
   trustedTokenCount: number;

@@ -50,6 +50,7 @@ export interface User {
   verifyDevices?: boolean;
   totpSecret: string | null;
   totpRecoveryCode: string | null;
+  apiKey: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -189,12 +190,14 @@ export interface Device {
   userId: string;
   deviceIdentifier: string;
   name: string;
+  deviceNote: string | null;
   type: number;
   sessionStamp: string;
   encryptedUserKey: string | null;
   encryptedPublicKey: string | null;
   encryptedPrivateKey: string | null;
   devicePendingAuthRequest?: DevicePendingAuthRequest | null;
+  lastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -208,10 +211,14 @@ export interface DeviceResponse {
   id: string;
   userId?: string | null;
   name: string;
+  systemName?: string | null;
+  deviceNote?: string | null;
   identifier: string;
   type: number;
   creationDate: string;
   revisionDate: string;
+  lastSeenAt?: string | null;
+  hasStoredDevice?: boolean;
   isTrusted: boolean;
   encryptedUserKey: string | null;
   encryptedPublicKey: string | null;
