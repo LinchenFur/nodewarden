@@ -9,4 +9,164 @@
 @import './styles/motion.css';
 @import './styles/responsive.css';
 @import './styles/dark.css';
-@import './styles/reduced-motion.css';
+
+/* Unified product polish: refined, smooth, comfortable surfaces across desktop, mobile, and dark mode. */
+
+/* ── surface consistency ── */
+.app-shell,
+.auth-card,
+.dialog-card,
+.card,
+.list-panel,
+.sidebar-block,
+.settings-subcard,
+.backup-operations-sidebar,
+.backup-destination-sidebar,
+.backup-detail-panel,
+.restore-progress-card,
+.backup-recommendation-card,
+.backup-destination-item,
+.backup-browser-list,
+.backup-browser-path,
+.totp-code-row,
+.mobile-settings-link,
+.table tr {
+  border-color: var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+}
+
+.app-shell {
+  background: var(--panel-soft);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.topbar,
+.mobile-tabbar,
+.app-side {
+  background: var(--panel-soft);
+  border-color: var(--line-soft);
+}
+
+/* ── active states ── */
+.side-link.active,
+.mobile-tab.active,
+.tree-btn.active,
+.list-item.active,
+.sort-menu-item.active,
+.backup-destination-item.active,
+.backup-interval-preset.active,
+.mobile-settings-link.active {
+  background: color-mix(in srgb, var(--primary) 12%, var(--panel));
+  border-color: color-mix(in srgb, var(--primary) 32%, var(--line));
+  color: var(--primary-strong);
+}
+
+/* ── danger / warning panels (cosmetic resets only) ── */
+.dialog-card.warning,
+:root[data-theme='dark'] .dialog-card.warning {
+  background: var(--panel);
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--line));
+  box-shadow: var(--shadow-lg);
+}
+
+.dialog-warning-badge {
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+  color: var(--danger);
+}
+
+.dialog-warning-kicker {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.dialog-message.warning,
+:root[data-theme='dark'] .dialog-message.warning {
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--danger) 20%, var(--line));
+  color: var(--text);
+}
+
+/* ── theme switch ── */
+.theme-switch-slider,
+.theme-switch-input:checked + .theme-switch-slider,
+:root[data-theme='dark'] .theme-switch-slider {
+  background: var(--panel-muted);
+  border-color: var(--line);
+}
+
+.theme-switch-slider::before,
+:root[data-theme='dark'] .theme-switch-slider::before {
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── dark mode surface resets ── */
+:root[data-theme='dark'] .app-shell,
+:root[data-theme='dark'] .auth-card,
+:root[data-theme='dark'] .dialog-card,
+:root[data-theme='dark'] .card,
+:root[data-theme='dark'] .list-panel,
+:root[data-theme='dark'] .sidebar-block,
+:root[data-theme='dark'] .settings-subcard,
+:root[data-theme='dark'] .backup-operations-sidebar,
+:root[data-theme='dark'] .backup-destination-sidebar,
+:root[data-theme='dark'] .backup-detail-panel,
+:root[data-theme='dark'] .backup-recommendation-card,
+:root[data-theme='dark'] .backup-recommendation-dav-item,
+:root[data-theme='dark'] .backup-destination-item,
+:root[data-theme='dark'] .backup-browser-list,
+:root[data-theme='dark'] .backup-browser-path,
+:root[data-theme='dark'] .totp-code-row,
+:root[data-theme='dark'] .mobile-settings-link,
+:root[data-theme='dark'] .table tr,
+:root[data-theme='dark'] .list-item,
+:root[data-theme='dark'] .input,
+:root[data-theme='dark'] .search-input,
+:root[data-theme='dark'] .create-menu,
+:root[data-theme='dark'] .create-menu-item,
+:root[data-theme='dark'] .sort-menu,
+:root[data-theme='dark'] .sort-menu-item {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+:root[data-theme='dark'] .topbar,
+:root[data-theme='dark'] .mobile-tabbar,
+:root[data-theme='dark'] .app-side {
+  background: var(--panel-soft);
+}
+
+:root[data-theme='dark'] .btn-secondary {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--primary);
+}
+
+:root[data-theme='dark'] .btn-primary {
+  background: var(--primary);
+  border-color: transparent;
+  color: #08111f;
+}
+
+:root[data-theme='dark'] .btn-danger {
+  background: var(--panel);
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--line));
+  color: var(--danger);
+}
+
+:root[data-theme='dark'] .list-item:hover,
+:root[data-theme='dark'] .sort-menu-item:hover,
+:root[data-theme='dark'] .create-menu-item:hover,
+:root[data-theme='dark'] .mobile-settings-link:hover,
+:root[data-theme='dark'] .backup-destination-item:hover,
+:root[data-theme='dark'] .side-link:hover,
+:root[data-theme='dark'] .mobile-tab:hover,
+:root[data-theme='dark'] .tree-btn:hover {
+  background: var(--panel-subtle);
+}
