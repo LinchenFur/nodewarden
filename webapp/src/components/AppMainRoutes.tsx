@@ -3,13 +3,14 @@ import { useEffect } from 'preact/hooks';
 import { Link, Route, Switch } from 'wouter';
 import { ArrowUpDown, Cloud, LogOut, Settings as SettingsIcon, Shield, ShieldUser } from 'lucide-preact';
 import type { ImportAttachmentFile, ImportResultSummary } from '@/components/ImportPage';
-import VaultPage from '@/components/VaultPage';
+import LoadingState from '@/components/LoadingState';
 import type { AdminBackupImportResponse, AdminBackupRunResponse, AdminBackupSettings, RemoteBackupBrowserResponse } from '@/lib/api/backup';
 import type { CiphersImportPayload } from '@/lib/api/vault';
 import { t } from '@/lib/i18n';
 import type { AdminInvite, AdminUser, AuthorizedDevice, Cipher, Folder as VaultFolder, Profile, Send, SendDraft, SessionState, VaultDraft } from '@/lib/types';
 import type { ExportRequest } from '@/lib/export-formats';
 
+const VaultPage = lazy(() => import('@/components/VaultPage'));
 const SendsPage = lazy(() => import('@/components/SendsPage'));
 const TotpCodesPage = lazy(() => import('@/components/TotpCodesPage'));
 const SettingsPage = lazy(() => import('@/components/SettingsPage'));
@@ -19,7 +20,7 @@ const BackupCenterPage = lazy(() => import('@/components/BackupCenterPage'));
 const ImportPage = lazy(() => import('@/components/ImportPage'));
 
 function RouteContentFallback() {
-  return <div className="loading-screen">{t('txt_loading_nodewarden')}</div>;
+  return <LoadingState card lines={5} />;
 }
 
 function LegacyBackupRedirect(props: { onNavigate: (path: string) => void }) {
@@ -31,6 +32,7 @@ function LegacyBackupRedirect(props: { onNavigate: (path: string) => void }) {
 
 export interface AppMainRoutesProps {
   profile: Profile | null;
+  profileLoading: boolean;
   session: SessionState | null;
   mobileLayout: boolean;
   mobileSidebarToggleKey: number;
@@ -40,16 +42,20 @@ export interface AppMainRoutesProps {
   decryptedCiphers: Cipher[];
   decryptedFolders: VaultFolder[];
   decryptedSends: Send[];
+  vaultError: string;
   ciphersLoading: boolean;
   foldersLoading: boolean;
   sendsLoading: boolean;
   users: AdminUser[];
   invites: AdminInvite[];
+  adminLoading: boolean;
+  adminError: string;
   totpEnabled: boolean;
   lockTimeoutMinutes: 0 | 1 | 5 | 15 | 30;
   sessionTimeoutAction: 'lock' | 'logout';
   authorizedDevices: AuthorizedDevice[];
   authorizedDevicesLoading: boolean;
+  authorizedDevicesError: string;
   onNavigate: (path: string) => void;
   onLogout: () => void;
   onNotify: (type: 'success' | 'error' | 'warning', text: string) => void;
@@ -129,6 +135,7 @@ export interface AppMainRoutesProps {
 
 export default function AppMainRoutes(props: AppMainRoutesProps) {
   const importRoutePaths = [props.importRoute, '/tools/import', '/tools/import-export', '/tools/import-data', '/import', '/import-export'] as const;
+  const isAdmin = String(props.profile?.role || '').toLowerCase() === 'admin';
   const importPageContent = (
     <Suspense fallback={<RouteContentFallback />}>
       <ImportPage
@@ -181,39 +188,42 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
         </Suspense>
       </Route>
       <Route path="/vault">
-        <VaultPage
-          ciphers={props.decryptedCiphers}
-          folders={props.decryptedFolders}
-          loading={props.ciphersLoading || props.foldersLoading}
-          emailForReprompt={props.profile?.email || props.session?.email || ''}
-          onRefresh={props.onRefreshVault}
-          onCreate={props.onCreateVaultItem}
-          onUpdate={props.onUpdateVaultItem}
-          onDelete={props.onDeleteVaultItem}
-          onArchive={props.onArchiveVaultItem}
-          onUnarchive={props.onUnarchiveVaultItem}
-          onBulkDelete={props.onBulkDeleteVaultItems}
-          onBulkPermanentDelete={props.onBulkPermanentDeleteVaultItems}
-          onBulkRestore={props.onBulkRestoreVaultItems}
-          onBulkArchive={props.onBulkArchiveVaultItems}
-          onBulkUnarchive={props.onBulkUnarchiveVaultItems}
-          onBulkMove={props.onBulkMoveVaultItems}
-          onVerifyMasterPassword={props.onVerifyMasterPassword}
-          onNotify={props.onNotify}
-          onCreateFolder={props.onCreateFolder}
-          onRenameFolder={props.onRenameFolder}
-          onDeleteFolder={props.onDeleteFolder}
-          onBulkDeleteFolders={props.onBulkDeleteFolders}
-          onDownloadAttachment={props.onDownloadVaultAttachment}
-          downloadingAttachmentKey={props.downloadingAttachmentKey}
-          attachmentDownloadPercent={props.attachmentDownloadPercent}
-          uploadingAttachmentName={props.uploadingAttachmentName}
-          attachmentUploadPercent={props.attachmentUploadPercent}
-          mobileSidebarToggleKey={props.mobileSidebarToggleKey}
-        />
+        <Suspense fallback={<RouteContentFallback />}>
+          <VaultPage
+            ciphers={props.decryptedCiphers}
+            folders={props.decryptedFolders}
+            loading={props.ciphersLoading || props.foldersLoading}
+            error={props.vaultError}
+            emailForReprompt={props.profile?.email || props.session?.email || ''}
+            onRefresh={props.onRefreshVault}
+            onCreate={props.onCreateVaultItem}
+            onUpdate={props.onUpdateVaultItem}
+            onDelete={props.onDeleteVaultItem}
+            onArchive={props.onArchiveVaultItem}
+            onUnarchive={props.onUnarchiveVaultItem}
+            onBulkDelete={props.onBulkDeleteVaultItems}
+            onBulkPermanentDelete={props.onBulkPermanentDeleteVaultItems}
+            onBulkRestore={props.onBulkRestoreVaultItems}
+            onBulkArchive={props.onBulkArchiveVaultItems}
+            onBulkUnarchive={props.onBulkUnarchiveVaultItems}
+            onBulkMove={props.onBulkMoveVaultItems}
+            onVerifyMasterPassword={props.onVerifyMasterPassword}
+            onNotify={props.onNotify}
+            onCreateFolder={props.onCreateFolder}
+            onRenameFolder={props.onRenameFolder}
+            onDeleteFolder={props.onDeleteFolder}
+            onBulkDeleteFolders={props.onBulkDeleteFolders}
+            onDownloadAttachment={props.onDownloadVaultAttachment}
+            downloadingAttachmentKey={props.downloadingAttachmentKey}
+            attachmentDownloadPercent={props.attachmentDownloadPercent}
+            uploadingAttachmentName={props.uploadingAttachmentName}
+            attachmentUploadPercent={props.attachmentUploadPercent}
+            mobileSidebarToggleKey={props.mobileSidebarToggleKey}
+          />
+        </Suspense>
       </Route>
       <Route path={props.settingsAccountRoute}>
-        {props.profile && (
+        {props.profile ? (
           <div className="stack">
             {props.mobileLayout && (
               <div className="mobile-settings-subhead">
@@ -242,10 +252,12 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
               />
             </Suspense>
           </div>
-        )}
+        ) : props.profileLoading ? (
+          <LoadingState card lines={5} />
+        ) : null}
       </Route>
       <Route path="/settings">
-        {props.profile && (
+        {props.profile ? (
           <section className="card mobile-settings-card">
             <div className="mobile-settings-links">
               <Link href={props.settingsAccountRoute} className="mobile-settings-link">
@@ -260,13 +272,13 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
                 <ArrowUpDown size={18} />
                 <span>{t('nav_import_export')}</span>
               </Link>
-              {props.profile.role === 'admin' && (
+              {isAdmin && (
                 <Link href="/admin" className="mobile-settings-link">
                   <ShieldUser size={18} />
                   <span>{t('nav_admin_panel')}</span>
                 </Link>
               )}
-              {props.profile.role === 'admin' && (
+              {isAdmin && (
                 <Link href="/backup" className="mobile-settings-link">
                   <Cloud size={18} />
                   <span>{t('nav_backup_strategy')}</span>
@@ -278,7 +290,9 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
               {t('txt_sign_out')}
             </button>
           </section>
-        )}
+        ) : props.profileLoading ? (
+          <LoadingState card lines={4} />
+        ) : null}
       </Route>
       <Route path="/security/devices">
         <div className="stack">
@@ -294,6 +308,7 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
             <SecurityDevicesPage
               devices={props.authorizedDevices}
               loading={props.authorizedDevicesLoading}
+              error={props.authorizedDevicesError}
               onRefresh={() => void props.onRefreshAuthorizedDevices()}
               onRenameDevice={props.onRenameAuthorizedDevice}
               onRevokeTrust={props.onRevokeDeviceTrust}
@@ -319,6 +334,8 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
               currentUserId={props.profile?.id || ''}
               users={props.users}
               invites={props.invites}
+              loading={props.adminLoading}
+              error={props.adminError}
               onRefresh={props.onRefreshAdmin}
               onCreateInvite={props.onCreateInvite}
               onDeleteAllInvites={props.onDeleteAllInvites}
@@ -338,7 +355,7 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
         <LegacyBackupRedirect onNavigate={props.onNavigate} />
       </Route>
       <Route path="/backup">
-        {props.profile?.role === 'admin' ? (
+        {isAdmin ? (
           <div className="stack">
             {props.mobileLayout && (
               <div className="mobile-settings-subhead">

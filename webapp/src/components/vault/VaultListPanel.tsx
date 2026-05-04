@@ -2,12 +2,13 @@ import type { RefObject } from 'preact';
 import { memo } from 'preact/compat';
 import { createPortal } from 'preact/compat';
 import { Archive, ArrowUpDown, Check, CheckCheck, FolderInput, Plus, RefreshCw, RotateCcw, Trash2, X } from 'lucide-preact';
+import LoadingState from '@/components/LoadingState';
 import type { Cipher } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import {
-  CREATE_TYPE_OPTIONS,
   CreateTypeIcon,
-  VAULT_SORT_OPTIONS,
+  getCreateTypeOptions,
+  getVaultSortOptions,
   VaultListIcon,
   type SidebarFilter,
   type VaultSortMode,
@@ -23,6 +24,7 @@ interface VirtualRange {
 interface VaultListPanelProps {
   busy: boolean;
   loading: boolean;
+  error: string;
   searchInput: string;
   sortMode: VaultSortMode;
   sortMenuOpen: boolean;
@@ -105,6 +107,8 @@ const CipherListItem = memo(function CipherListItem(props: CipherListItemProps) 
 });
 
 export default function VaultListPanel(props: VaultListPanelProps) {
+  const createTypeOptions = getCreateTypeOptions();
+  const vaultSortOptions = getVaultSortOptions();
   const createMenu = (
     <div className="create-menu-wrap mobile-fab-wrap" ref={props.createMenuRef}>
       <button
@@ -118,7 +122,7 @@ export default function VaultListPanel(props: VaultListPanelProps) {
       </button>
       {props.createMenuOpen && (
         <div className="create-menu">
-          {CREATE_TYPE_OPTIONS.map((option) => (
+          {createTypeOptions.map((option) => (
             <button key={option.type} type="button" className="create-menu-item" onClick={() => props.onStartCreate(option.type)}>
               <CreateTypeIcon type={option.type} />
               <span>{option.label}</span>
@@ -170,7 +174,7 @@ export default function VaultListPanel(props: VaultListPanelProps) {
           </button>
           {props.sortMenuOpen && (
             <div className="sort-menu">
-              {VAULT_SORT_OPTIONS.map((option) => (
+              {vaultSortOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
@@ -234,6 +238,15 @@ export default function VaultListPanel(props: VaultListPanelProps) {
       </div>
 
       <div className="list-panel" ref={props.listPanelRef} onScroll={(event) => props.onScroll((event.currentTarget as HTMLDivElement).scrollTop)}>
+        {props.loading && !props.filteredCiphers.length && <LoadingState lines={7} compact />}
+        {!props.loading && !!props.error && !props.filteredCiphers.length && (
+          <div className="empty vault-error-state">
+            <strong>{props.error}</strong>
+            <button type="button" className="btn btn-secondary small" disabled={props.busy} onClick={props.onSyncVault}>
+              {t('txt_retry_sync')}
+            </button>
+          </div>
+        )}
         {!!props.filteredCiphers.length && (
           <div style={{ paddingTop: `${props.virtualRange.padTop}px`, paddingBottom: `${props.virtualRange.padBottom}px` }}>
             {props.visibleCiphers.map((cipher) => (
@@ -249,7 +262,7 @@ export default function VaultListPanel(props: VaultListPanelProps) {
             ))}
           </div>
         )}
-        {!props.filteredCiphers.length && <div className="empty">{t('txt_no_items')}</div>}
+        {!props.loading && !props.error && !props.filteredCiphers.length && <div className="empty">{t('txt_no_items')}</div>}
       </div>
     </section>
   );

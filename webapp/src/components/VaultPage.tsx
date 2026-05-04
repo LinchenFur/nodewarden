@@ -1,4 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import LoadingState from '@/components/LoadingState';
 import VaultDialogs from '@/components/vault/VaultDialogs';
 import VaultDetailView from '@/components/vault/VaultDetailView';
 import VaultEditor from '@/components/vault/VaultEditor';
@@ -35,6 +36,7 @@ interface VaultPageProps {
   ciphers: Cipher[];
   folders: Folder[];
   loading: boolean;
+  error: string;
   emailForReprompt: string;
   onRefresh: () => Promise<void>;
   onCreate: (draft: VaultDraft, attachments?: File[]) => Promise<void>;
@@ -1020,6 +1022,7 @@ const folderName = useCallback((id: string | null | undefined): string => {
         <VaultListPanel
           busy={busy}
           loading={props.loading}
+          error={props.error}
           searchInput={searchInput}
           sortMode={sortMode}
           sortMenuOpen={sortMenuOpen}
@@ -1139,7 +1142,20 @@ const folderName = useCallback((id: string | null | undefined): string => {
             </div>
           )}
 
-          {!isEditing && !selectedCipher && <div className="empty card">{t('txt_select_an_item')}</div>}
+          {!isEditing && !selectedCipher && (
+            props.loading
+              ? <LoadingState card lines={5} />
+              : props.error
+                ? (
+                  <div className="empty card vault-error-state">
+                    <strong>{props.error}</strong>
+                    <button type="button" className="btn btn-secondary small" disabled={busy} onClick={handleSyncVault}>
+                      {t('txt_retry_sync')}
+                    </button>
+                  </div>
+                )
+                : <div className="empty card">{t('txt_select_an_item')}</div>
+          )}
         </section>
       </div>
 

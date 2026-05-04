@@ -46,6 +46,8 @@ interface RefreshSuccess {
 
 type RefreshResult = RefreshFailure | RefreshSuccess;
 
+const pendingRefreshes = new Map<string, Promise<RefreshResult>>();
+
 function randomHex(length: number): string {
   const bytes = crypto.getRandomValues(new Uint8Array(Math.max(1, Math.ceil(length / 2))));
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, length);
@@ -134,7 +136,28 @@ export function loadProfileSnapshot(email?: string | null): Profile | null {
 
 export function saveProfileSnapshot(profile: Profile | null): void {
   if (!profile) return;
-  localStorage.setItem(PROFILE_SNAPSHOT_KEY, JSON.stringify(stripProfileSecrets(profile)));
+  const nextSnapshot = stripProfileSecrets(profile);
+  try {
+    const rawExisting = localStorage.getItem(PROFILE_SNAPSHOT_KEY);
+    if (rawExisting) {
+      const existing = stripProfileSecrets(JSON.parse(rawExisting) as Profile);
+      if (
+        existing
+        && existing.email === nextSnapshot?.email
+        && existing.role === 'admin'
+        && nextSnapshot?.role !== 'admin'
+      ) {
+        localStorage.setItem(PROFILE_SNAPSHOT_KEY, JSON.stringify({
+          ...nextSnapshot,
+          role: 'admin',
+        }));
+        return;
+      }
+    }
+  } catch {
+    // Fall back to writing the normalized snapshot below.
+  }
+  localStorage.setItem(PROFILE_SNAPSHOT_KEY, JSON.stringify(nextSnapshot));
 }
 
 export function clearProfileSnapshot(): void {
@@ -291,6 +314,25 @@ export async function refreshAccessToken(session: SessionState): Promise<Refresh
   }
 }
 
+function refreshKey(session: SessionState): string {
+  if (session.authMode === 'web-cookie') return `web-cookie:${session.email || ''}`;
+  return `token:${session.refreshToken || ''}`;
+}
+
+function refreshAccessTokenOnce(session: SessionState): Promise<RefreshResult> {
+  const key = refreshKey(session);
+  const existing = pendingRefreshes.get(key);
+  if (existing) return existing;
+
+  const request = refreshAccessToken(session).finally(() => {
+    if (pendingRefreshes.get(key) === request) {
+      pendingRefreshes.delete(key);
+    }
+  });
+  pendingRefreshes.set(key, request);
+  return request;
+}
+
 export async function revokeCurrentSession(session: SessionState | null): Promise<void> {
   const body = new URLSearchParams();
   if (session?.authMode !== 'web-cookie' && session?.refreshToken) {
@@ -382,15 +424,49 @@ export async function getPasswordHint(email: string): Promise<{ masterPasswordHi
 
 export function createAuthedFetch(getSession: () => SessionState | null, setSession: SessionSetter) {
   return async function authedFetch(input: string, init: RequestInit = {}): Promise<Response> {
+    const retryableRequest = async (headers: Headers): Promise<Response> => {
+      const maxAttempts = 3;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        try {
+          const response = await fetch(input, { ...init, headers });
+          if (response.status !== 429 && (response.status < 500 || response.status >= 600)) {
+            return response;
+          }
+          lastError = new Error(`HTTP ${response.status}`);
+          if (attempt === maxAttempts - 1) {
+            return response;
+          }
+        } catch (error) {
+          lastError = error;
+          if (attempt === maxAttempts - 1) {
+            throw error;
+          }
+        }
+        const delayMs = 250 * (2 ** attempt) + Math.floor(Math.random() * 120);
+        await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+      }
+      throw lastError instanceof Error ? lastError : new Error('Request failed');
+    };
+
     const session = getSession();
     if (!session?.accessToken) throw new Error('Unauthorized');
     const headers = new Headers(init.headers || {});
     headers.set('Authorization', `Bearer ${session.accessToken}`);
 
-    let resp = await fetch(input, { ...init, headers });
+    let resp = await retryableRequest(headers);
     if (resp.status !== 401 || (!session.refreshToken && session.authMode !== 'web-cookie')) return resp;
 
-    const refreshed = await refreshAccessToken(session);
+    const latest = getSession();
+    if (latest?.accessToken && latest.accessToken !== session.accessToken) {
+      const latestHeaders = new Headers(init.headers || {});
+      latestHeaders.set('Authorization', `Bearer ${latest.accessToken}`);
+      resp = await retryableRequest(latestHeaders);
+      if (resp.status !== 401) return resp;
+    }
+
+    const refreshSource = latest || session;
+    const refreshed = await refreshAccessTokenOnce(refreshSource);
     if (!refreshed.ok) {
       if (refreshed.transient) {
         throw new Error(refreshed.error || 'Session refresh temporarily unavailable');
@@ -400,17 +476,17 @@ export function createAuthedFetch(getSession: () => SessionState | null, setSess
     }
 
     const nextSession: SessionState = {
-      ...session,
+      ...refreshSource,
       accessToken: refreshed.token.access_token,
-      refreshToken: refreshed.token.refresh_token || session.refreshToken,
-      authMode: refreshed.token.web_session ? 'web-cookie' : (session.authMode || 'token'),
+      refreshToken: refreshed.token.refresh_token || refreshSource.refreshToken,
+      authMode: refreshed.token.web_session ? 'web-cookie' : (refreshSource.authMode || 'token'),
     };
     setSession(nextSession);
     saveSession(nextSession);
 
     const retryHeaders = new Headers(init.headers || {});
     retryHeaders.set('Authorization', `Bearer ${nextSession.accessToken}`);
-    resp = await fetch(input, { ...init, headers: retryHeaders });
+    resp = await retryableRequest(retryHeaders);
     return resp;
   };
 }
@@ -516,6 +592,19 @@ export async function verifyMasterPassword(
     const body = await parseJson<TokenError>(resp);
     throw new Error(body?.error_description || body?.error || 'Master password verify failed');
   }
+}
+
+export async function getVaultRevisionDate(authedFetch: AuthedFetch): Promise<number> {
+  const resp = await authedFetch('/api/accounts/revision-date');
+  if (!resp.ok) {
+    throw new Error('Failed to load revision date');
+  }
+  const body = await parseJson<number>(resp);
+  const stamp = Number(body);
+  if (!Number.isFinite(stamp) || stamp <= 0) {
+    throw new Error('Invalid revision date');
+  }
+  return stamp;
 }
 
 export async function getTotpStatus(authedFetch: AuthedFetch): Promise<{ enabled: boolean }> {
