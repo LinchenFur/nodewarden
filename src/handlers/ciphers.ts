@@ -17,12 +17,25 @@ import { generateUUID } from '../utils/uuid';
 import { deleteAllAttachmentsForCipher, deleteAllAttachmentsForCiphers } from './attachments';
 import { parsePagination, encodeContinuationToken } from '../utils/pagination';
 import { readActingDeviceIdentifier } from '../utils/device';
+import { auditRequestMetadata, writeAuditEvent } from '../services/audit-events';
 
 // CONTRACT:
 // Cipher JSON is the highest-risk Bitwarden compatibility surface. Preserve
 // unknown/future client fields by default, then override only server-owned
 // fields. Any change to cipher response shape must be checked against /api/sync,
 // attachments, import/export, and current official clients.
+export interface CipherResponseOptions {
+  preserveRepairableUris?: boolean;
+}
+
+export function shouldPreserveRepairableCipherUris(request: Request): boolean {
+  return request.headers.get('X-NodeWarden-Web') === '1';
+}
+
+function cipherResponseOptionsForRequest(request: Request): CipherResponseOptions {
+  return { preserveRepairableUris: shouldPreserveRepairableCipherUris(request) };
+}
+
 function normalizeOptionalId(value: unknown): string | null {
   if (value == null) return null;
   const normalized = String(value).trim();
@@ -83,6 +96,27 @@ function syncCipherComputedAliases(cipher: Cipher): Cipher {
   return cipher;
 }
 
+async function writeCipherAudit(
+  storage: StorageService,
+  request: Request,
+  userId: string,
+  action: string,
+  metadata: Record<string, unknown>
+): Promise<void> {
+  await writeAuditEvent(storage, {
+    actorUserId: userId,
+    action,
+    category: 'data',
+    level: action.includes('delete') ? 'security' : 'info',
+    targetType: 'cipher',
+    targetId: typeof metadata.id === 'string' ? metadata.id : null,
+    metadata: {
+      ...metadata,
+      ...auditRequestMetadata(request),
+    },
+  });
+}
+
 function isValidEncString(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const trimmed = value.trim();
@@ -107,15 +141,32 @@ function optionalEncString(value: unknown): string | null {
   return isValidEncString(value) ? value.trim() : null;
 }
 
+function optionalEncStringWithin(value: unknown, maxLength: number): string | null {
+  const normalized = optionalEncString(value);
+  if (!normalized) return null;
+  return normalized.length <= maxLength ? normalized : null;
+}
+
+function shouldAcceptCipherKey(value: unknown): boolean {
+  return value == null || value === '' || isValidEncString(value);
+}
+
+function normalizeCipherKeyForStorage(value: unknown): string | null {
+  return optionalEncString(value);
+}
+
 function sanitizeEncryptedObject<T extends Record<string, any>>(
   source: T | null | undefined,
-  encryptedKeys: readonly string[]
+  encryptedKeys: readonly string[] | Record<string, number>
 ): T | null {
   if (!source || typeof source !== 'object') return source ?? null;
   const next: Record<string, any> = { ...source };
-  for (const key of encryptedKeys) {
+  const entries = Array.isArray(encryptedKeys)
+    ? encryptedKeys.map((key) => [key, 10000] as const)
+    : Object.entries(encryptedKeys);
+  for (const [key, maxLength] of entries) {
     if (!Object.prototype.hasOwnProperty.call(next, key)) continue;
-    next[key] = optionalEncString(next[key]);
+    next[key] = optionalEncStringWithin(next[key], maxLength);
   }
   return next as T;
 }
@@ -139,18 +190,90 @@ export function normalizeCipherLoginForStorage(login: any): any {
   };
 }
 
-export function normalizeCipherLoginForCompatibility(login: any): any {
+export function normalizeCipherLoginForCompatibility(
+  login: any,
+  requiresUriChecksum: boolean = false,
+  preserveRepairableUris: boolean = false
+): any {
   const normalized = normalizeCipherLoginForStorage(login);
   if (!normalized || typeof normalized !== 'object') return normalized ?? null;
-  const next = sanitizeEncryptedObject(normalized, ['username', 'password', 'totp', 'uri']);
+  const next = sanitizeEncryptedObject(normalized, {
+    username: 1000,
+    password: 5000,
+    totp: 1000,
+    uri: 10000,
+  });
   if (!next) return null;
-  next.uris = Array.isArray(next.uris)
-    ? next.uris
-        .map((uri: any) => sanitizeEncryptedObject(uri, ['uri', 'uriChecksum']))
-        .filter((uri: any) => !!uri && (uri.uri || uri.uriChecksum || uri.match != null))
-    : null;
+  next.uris = normalizeCipherLoginUrisForCompatibility(next.uris, {
+    requiresUriChecksum,
+    preserveRepairableUris,
+  });
   next.fido2Credentials = normalizeFido2CredentialsForCompatibility(next.fido2Credentials);
   return next;
+}
+
+function normalizeCipherLoginUrisForCompatibility(
+  uris: any,
+  options: { requiresUriChecksum?: boolean; preserveRepairableUris?: boolean } = {}
+): any[] | null {
+  if (!Array.isArray(uris) || uris.length === 0) return null;
+  const out: any[] = [];
+
+  for (const uri of uris) {
+    if (!uri || typeof uri !== 'object') continue;
+    const next = sanitizeEncryptedObject(uri, ['uri', 'uriChecksum']);
+    if (!next) continue;
+
+    const hasUri = isValidEncString(next.uri);
+    const hasChecksum = isValidEncString(next.uriChecksum);
+    const hasMatch = next.match != null;
+
+    if (hasUri && String(next.uri).trim().length > 10000) continue;
+    if (hasChecksum && String(next.uriChecksum).trim().length > 10000) {
+      next.uriChecksum = null;
+    }
+
+    if (hasUri && isValidEncString(next.uriChecksum)) {
+      out.push(next);
+      continue;
+    }
+
+    if (hasUri && !hasChecksum) {
+      // Official Bitwarden treats UriChecksum as nullable encrypted metadata.
+      // Keep the URI intact and let clients that can repair checksums do so.
+      out.push({ ...next, uriChecksum: null });
+      continue;
+    }
+
+    if (hasChecksum || hasMatch) {
+      out.push(next);
+    }
+  }
+
+  return out.length ? out : null;
+}
+
+export function validateCipherEncryptedFieldsForCompatibility(cipher: Cipher): string | null {
+  if (cipher.name != null && !optionalEncStringWithin(cipher.name, 1000)) return 'Cipher name must be an encrypted string up to 1000 characters.';
+  if (cipher.notes != null && !optionalEncStringWithin(cipher.notes, 10000)) return 'Cipher notes must be an encrypted string up to 10000 characters.';
+
+  const login = cipher.login as any;
+  if (login && typeof login === 'object') {
+    if (login.username != null && !optionalEncStringWithin(login.username, 1000)) return 'Login username must be an encrypted string up to 1000 characters.';
+    if (login.password != null && !optionalEncStringWithin(login.password, 5000)) return 'Login password must be an encrypted string up to 5000 characters.';
+    if (login.totp != null && !optionalEncStringWithin(login.totp, 1000)) return 'Login TOTP must be an encrypted string up to 1000 characters.';
+    if (login.uri != null && !optionalEncStringWithin(login.uri, 10000)) return 'Login URI must be an encrypted string up to 10000 characters.';
+
+    if (Array.isArray(login.uris)) {
+      for (const uri of login.uris) {
+        if (!uri || typeof uri !== 'object') continue;
+        if (uri.uri != null && !optionalEncStringWithin(uri.uri, 10000)) return 'Login URI must be an encrypted string up to 10000 characters.';
+        if (uri.uriChecksum != null && !optionalEncStringWithin(uri.uriChecksum, 10000)) return 'Login URI checksum must be an encrypted string up to 10000 characters.';
+      }
+    }
+  }
+
+  return null;
 }
 
 function normalizeFido2CredentialsForCompatibility(credentials: any): any[] | null {
@@ -223,6 +346,14 @@ export function normalizeCipherSshKeyForCompatibility(sshKey: any): any {
   };
 }
 
+function normalizeCipherSecureNoteForCompatibility(secureNote: any): CipherSecureNote | null {
+  if (!secureNote || typeof secureNote !== 'object') return null;
+  const type = Number(secureNote?.type ?? secureNote?.Type ?? 0);
+  return {
+    type: Number.isFinite(type) ? type : 0,
+  };
+}
+
 // Format attachments for API response
 export function formatAttachments(attachments: Attachment[]): any[] | null {
   if (attachments.length === 0) return null;
@@ -239,6 +370,196 @@ export function formatAttachments(attachments: Attachment[]): any[] | null {
       object: 'attachment',
     }));
   return formatted.length ? formatted : null;
+}
+
+function formatAttachmentSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} Bytes`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+interface IncomingAttachmentMetadata {
+  id: string;
+  fileName?: unknown;
+  key?: unknown;
+  fileSize?: unknown;
+  hasFileName: boolean;
+  hasKey: boolean;
+  hasFileSize: boolean;
+}
+
+function readIncomingAttachmentMetadataMap(
+  value: unknown,
+  options: { legacyFileNameMap?: boolean } = {}
+): IncomingAttachmentMetadata[] {
+  if (!value || typeof value !== 'object') return [];
+  const out: IncomingAttachmentMetadata[] = [];
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      const id = String(row.id ?? row.Id ?? '').trim();
+      if (!id) continue;
+      const fileName = getAliasedProp(row, ['fileName', 'FileName']);
+      const key = getAliasedProp(row, ['key', 'Key']);
+      const fileSize = getAliasedProp(row, ['fileSize', 'FileSize', 'size', 'Size']);
+      out.push({
+        id,
+        fileName: fileName.value,
+        key: key.value,
+        fileSize: fileSize.value,
+        hasFileName: fileName.present,
+        hasKey: key.present,
+        hasFileSize: fileSize.present,
+      });
+    }
+    return out;
+  }
+
+  for (const [rawId, rawValue] of Object.entries(value as Record<string, unknown>)) {
+    const id = String(rawId || '').trim();
+    if (!id) continue;
+
+    if (options.legacyFileNameMap && (typeof rawValue === 'string' || rawValue == null)) {
+      out.push({
+        id,
+        fileName: rawValue,
+        key: undefined,
+        fileSize: undefined,
+        hasFileName: rawValue != null,
+        hasKey: false,
+        hasFileSize: false,
+      });
+      continue;
+    }
+
+    if (!rawValue || typeof rawValue !== 'object') continue;
+    const row = rawValue as Record<string, unknown>;
+    const fileName = getAliasedProp(row, ['fileName', 'FileName']);
+    const key = getAliasedProp(row, ['key', 'Key']);
+    const fileSize = getAliasedProp(row, ['fileSize', 'FileSize', 'size', 'Size']);
+    out.push({
+      id,
+      fileName: fileName.value,
+      key: key.value,
+      fileSize: fileSize.value,
+      hasFileName: fileName.present,
+      hasKey: key.present,
+      hasFileSize: fileSize.present,
+    });
+  }
+
+  return out;
+}
+
+function readIncomingAttachmentMetadata(source: any): IncomingAttachmentMetadata[] {
+  const merged = new Map<string, IncomingAttachmentMetadata>();
+  const legacy = getAliasedProp(source, ['attachments', 'Attachments']);
+  const current = getAliasedProp(source, ['attachments2', 'Attachments2']);
+
+  if (legacy.present) {
+    for (const item of readIncomingAttachmentMetadataMap(legacy.value, { legacyFileNameMap: true })) {
+      merged.set(item.id, item);
+    }
+  }
+
+  if (current.present) {
+    for (const item of readIncomingAttachmentMetadataMap(current.value)) {
+      const previous = merged.get(item.id);
+      merged.set(item.id, {
+        id: item.id,
+        fileName: item.hasFileName ? item.fileName : previous?.fileName,
+        key: item.hasKey ? item.key : previous?.key,
+        fileSize: item.hasFileSize ? item.fileSize : previous?.fileSize,
+        hasFileName: item.hasFileName || previous?.hasFileName || false,
+        hasKey: item.hasKey || previous?.hasKey || false,
+        hasFileSize: item.hasFileSize || previous?.hasFileSize || false,
+      });
+    }
+  }
+
+  return [...merged.values()];
+}
+
+function hasIncomingAttachmentMetadata(source: any): boolean {
+  return readIncomingAttachmentMetadata(source).length > 0;
+}
+
+async function syncIncomingAttachmentMetadata(
+  storage: StorageService,
+  cipherId: string,
+  cipherData: any
+): Promise<void> {
+  const incoming = readIncomingAttachmentMetadata(cipherData);
+  if (!incoming.length) return;
+
+  const currentById = new Map((await storage.getAttachmentsByCipher(cipherId)).map((attachment) => [attachment.id, attachment]));
+  for (const item of incoming) {
+    const attachment = currentById.get(item.id);
+    if (!attachment) continue;
+
+    let changed = false;
+    if (item.hasFileName) {
+      const fileName = String(item.fileName || '').trim();
+      if (isValidEncString(fileName) && fileName !== attachment.fileName) {
+        attachment.fileName = fileName;
+        changed = true;
+      }
+    }
+
+    if (item.hasKey) {
+      const key = optionalEncString(item.key);
+      if (key !== attachment.key) {
+        attachment.key = key;
+        changed = true;
+      }
+    }
+
+    if (item.hasFileSize) {
+      const size = Number(item.fileSize);
+      if (Number.isFinite(size) && size >= 0 && size !== Number(attachment.size || 0)) {
+        attachment.size = size;
+        attachment.sizeName = formatAttachmentSize(size);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await storage.saveAttachment(attachment);
+    }
+  }
+}
+
+export function applyCipherEmbeddedAttachmentMetadata(cipherData: any, attachments: Attachment[]): Attachment[] {
+  const incoming = readIncomingAttachmentMetadata(cipherData);
+  if (!incoming.length || !attachments.length) return attachments;
+
+  const incomingById = new Map(incoming.map((item) => [item.id, item]));
+  return attachments.map((attachment) => {
+    const item = incomingById.get(attachment.id);
+    if (!item) return attachment;
+
+    const next: Attachment = { ...attachment };
+    if (item.hasFileName) {
+      const fileName = String(item.fileName || '').trim();
+      if (isValidEncString(fileName)) {
+        next.fileName = fileName;
+      }
+    }
+    if (item.hasKey) {
+      next.key = optionalEncString(item.key);
+    }
+    if (item.hasFileSize) {
+      const size = Number(item.fileSize);
+      if (Number.isFinite(size) && size >= 0) {
+        next.size = size;
+        next.sizeName = formatAttachmentSize(size);
+      }
+    }
+    return next;
+  });
 }
 
 function normalizeCipherFieldsForCompatibility(fields: any): any[] | null {
@@ -280,12 +601,25 @@ export function isCipherResponseSyncCompatible(cipher: CipherResponse): boolean 
 // survive a round-trip without code changes.
 export function cipherToResponse(
   cipher: Cipher,
-  attachments: Attachment[] = []
+  attachments: Attachment[] = [],
+  options: CipherResponseOptions = {}
 ): CipherResponse {
   // Strip internal-only fields that must not appear in the API response
   const { userId, createdAt, updatedAt, archivedAt, deletedAt, ...passthrough } = cipher;
-  const normalizedLogin = normalizeCipherLoginForCompatibility((passthrough as any).login ?? null);
-  const normalizedCard = sanitizeEncryptedObject((passthrough as any).card ?? null, ['cardholderName', 'brand', 'number', 'expMonth', 'expYear', 'code']);
+  const responseCipherKey = optionalEncString(cipher.key);
+  const normalizedLogin = normalizeCipherLoginForCompatibility(
+    (passthrough as any).login ?? null,
+    !!responseCipherKey,
+    !!options.preserveRepairableUris
+  );
+  const normalizedCard = sanitizeEncryptedObject((passthrough as any).card ?? null, {
+    cardholderName: 1000,
+    brand: 1000,
+    number: 1000,
+    expMonth: 1000,
+    expYear: 1000,
+    code: 1000,
+  });
   const normalizedIdentity = sanitizeEncryptedObject((passthrough as any).identity ?? null, [
     'title',
     'firstName',
@@ -307,6 +641,10 @@ export function cipherToResponse(
     'licenseNumber',
   ]);
   const normalizedSshKey = normalizeCipherSshKeyForCompatibility((passthrough as any).sshKey ?? null);
+  const normalizedSecureNote = Number(cipher.type) === 2
+    ? normalizeCipherSecureNoteForCompatibility((passthrough as any).secureNote ?? null) ?? { type: 0 }
+    : null;
+  const responseAttachments = applyCipherEmbeddedAttachmentMetadata(cipher, attachments);
 
   return {
     // Pass through ALL stored cipher fields (known + unknown)
@@ -328,16 +666,18 @@ export function cipherToResponse(
     },
     object: 'cipherDetails',
     collectionIds: Array.isArray((passthrough as any).collectionIds) ? (passthrough as any).collectionIds : [],
-    attachments: formatAttachments(attachments),
+    attachments: formatAttachments(responseAttachments),
     name: isValidEncString(cipher.name) ? cipher.name.trim() : cipher.name,
     notes: optionalEncString(cipher.notes),
     login: normalizedLogin,
     card: normalizedCard,
     identity: normalizedIdentity,
+    secureNote: normalizedSecureNote,
     fields: normalizeCipherFieldsForCompatibility((passthrough as any).fields),
     passwordHistory: normalizePasswordHistoryForCompatibility((passthrough as any).passwordHistory),
     sshKey: normalizedSshKey,
-    key: optionalEncString(cipher.key),
+    key: responseCipherKey,
+    data: typeof (passthrough as any).data === 'string' ? (passthrough as any).data : null,
     encryptedFor: (passthrough as any).encryptedFor ?? null,
   };
 }
@@ -373,10 +713,11 @@ export async function handleGetCiphers(request: Request, env: Env, userId: strin
   );
 
   // Build responses only for the current page to keep pagination cheap.
+  const responseOptions = cipherResponseOptionsForRequest(request);
   const cipherResponses: CipherResponse[] = [];
   for (const cipher of filteredCiphers) {
     const attachments = attachmentsByCipher.get(cipher.id) || [];
-    cipherResponses.push(cipherToResponse(cipher, attachments));
+    cipherResponses.push(cipherToResponse(cipher, attachments, responseOptions));
   }
 
   return jsonResponse({
@@ -396,8 +737,9 @@ export async function handleGetCipher(request: Request, env: Env, userId: string
   }
 
   const attachments = await storage.getAttachmentsByCipher(cipher.id);
+  const responseOptions = cipherResponseOptionsForRequest(request);
   return jsonResponse(
-    cipherToResponse(cipher, attachments)
+    cipherToResponse(cipher, attachments, responseOptions)
   );
 }
 
@@ -430,6 +772,10 @@ export async function handleCreateCipher(request: Request, env: Env, userId: str
   const createSshKey = readCipherProp<CipherSshKey | null>(cipherData, ['sshKey', 'SshKey']);
   const createPasswordHistory = readCipherProp<PasswordHistory[] | null>(cipherData, ['passwordHistory', 'PasswordHistory']);
 
+  if (createKey.present && !shouldAcceptCipherKey(createKey.value)) {
+    return errorResponse('Cipher key encryption is not supported by this server. Resync the client and try again.', 400);
+  }
+
   const now = new Date().toISOString();
   // Opaque passthrough: spread ALL client fields to preserve unknown/future ones,
   // then override only server-controlled fields.
@@ -447,7 +793,7 @@ export async function handleCreateCipher(request: Request, env: Env, userId: str
     deletedAt: null,
   };
   cipher.folderId = createFolderId.present ? normalizeOptionalId(createFolderId.value) : normalizeOptionalId(cipher.folderId);
-  cipher.key = createKey.present ? (createKey.value ?? null) : (cipher.key ?? null);
+  cipher.key = normalizeCipherKeyForStorage(createKey.present ? createKey.value : cipher.key);
   cipher.login = createLogin.present ? (createLogin.value ?? null) : (cipher.login ?? null);
   cipher.card = createCard.present ? (createCard.value ?? null) : (cipher.card ?? null);
   cipher.identity = createIdentity.present ? (createIdentity.value ?? null) : (cipher.identity ?? null);
@@ -457,6 +803,8 @@ export async function handleCreateCipher(request: Request, env: Env, userId: str
   const createFields = getAliasedProp(cipherData, ['fields', 'Fields']);
   cipher.fields = createFields.present ? (createFields.value ?? null) : (cipher.fields ?? null);
   normalizeCipherForStorage(cipher);
+  const compatibilityError = validateCipherEncryptedFieldsForCompatibility(cipher);
+  if (compatibilityError) return errorResponse(compatibilityError, 400);
 
   // Prevent referencing a folder owned by another user.
   if (cipher.folderId) {
@@ -467,9 +815,10 @@ export async function handleCreateCipher(request: Request, env: Env, userId: str
   await storage.saveCipher(cipher);
   const revisionDate = await storage.updateRevisionDate(userId);
   notifyVaultSyncForRequest(request, env, userId, revisionDate);
+  const responseOptions = cipherResponseOptionsForRequest(request);
 
   return jsonResponse(
-    cipherToResponse(cipher, []),
+    cipherToResponse(cipher, [], responseOptions),
     200
   );
 }
@@ -502,8 +851,16 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
   const incomingSshKey = readCipherProp<CipherSshKey | null>(cipherData, ['sshKey', 'SshKey']);
   const incomingPasswordHistory = readCipherProp<PasswordHistory[] | null>(cipherData, ['passwordHistory', 'PasswordHistory']);
   const incomingRevisionDate = readCipherRevisionDate(cipherData);
+  const hasAttachmentMigrationMetadata = hasIncomingAttachmentMetadata(cipherData);
+  const preserveRevisionDate =
+    shouldPreserveRepairableCipherUris(request)
+    && (body.preserveRevisionDate === true || cipherData.preserveRevisionDate === true);
 
-  if (isStaleCipherUpdate(existingCipher.updatedAt, incomingRevisionDate)) {
+  if (incomingKey.present && !shouldAcceptCipherKey(incomingKey.value)) {
+    return errorResponse('Cipher key encryption is not supported by this server. Resync the client and try again.', 400);
+  }
+
+  if (!hasAttachmentMigrationMetadata && isStaleCipherUpdate(existingCipher.updatedAt, incomingRevisionDate)) {
     return errorResponse('The client copy of this cipher is out of date. Resync the client and try again.', 400);
   }
 
@@ -511,9 +868,10 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
 
   // Opaque passthrough: merge existing stored data with ALL incoming client fields.
   // Unknown/future fields from the client are preserved; server-controlled fields are protected.
+  const { preserveRevisionDate: _preserveRevisionDate, PreserveRevisionDate: _pascalPreserveRevisionDate, ...cipherDataWithoutFlags } = cipherData;
   const cipher: Cipher = {
     ...existingCipher,   // start with all existing stored data (including unknowns)
-    ...cipherData,       // overlay all client data (including new/unknown fields)
+    ...cipherDataWithoutFlags, // overlay all client data (including new/unknown fields)
     // Server-controlled fields (never from client)
     id: existingCipher.id,
     userId: existingCipher.userId,
@@ -521,7 +879,7 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
     favorite: cipherData.favorite ?? existingCipher.favorite,
     reprompt: cipherData.reprompt ?? existingCipher.reprompt,
     createdAt: existingCipher.createdAt,
-    updatedAt: new Date().toISOString(),
+    updatedAt: preserveRevisionDate ? existingCipher.updatedAt : new Date().toISOString(),
     archivedAt: readCipherArchivedAt(cipherData, existingCipher.archivedAt ?? null),
     deletedAt: existingCipher.deletedAt,
   };
@@ -529,7 +887,10 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
     cipher.folderId = normalizeOptionalId(incomingFolderId.value);
   }
   if (incomingKey.present) {
-    cipher.key = incomingKey.value ?? null;
+    const normalizedIncomingKey = normalizeCipherKeyForStorage(incomingKey.value);
+    cipher.key = normalizedIncomingKey || normalizeCipherKeyForStorage(existingCipher.key);
+  } else {
+    cipher.key = normalizeCipherKeyForStorage(existingCipher.key);
   }
   cipher.login = nextType === 1 ? (incomingLogin.present ? (incomingLogin.value ?? null) : (existingCipher.login ?? null)) : null;
   cipher.secureNote = nextType === 2 ? (incomingSecureNote.present ? (incomingSecureNote.value ?? null) : (existingCipher.secureNote ?? null)) : null;
@@ -551,6 +912,8 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
     cipher.fields = null;
   }
   normalizeCipherForStorage(cipher);
+  const compatibilityError = validateCipherEncryptedFieldsForCompatibility(cipher);
+  if (compatibilityError) return errorResponse(compatibilityError, 400);
 
   // Prevent referencing a folder owned by another user.
   if (cipher.folderId) {
@@ -558,13 +921,15 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
     if (!folderOk) return errorResponse('Folder not found', 404);
   }
 
+  await syncIncomingAttachmentMetadata(storage, cipher.id, cipherData);
   await storage.saveCipher(cipher);
   const revisionDate = await storage.updateRevisionDate(userId);
   notifyVaultSyncForRequest(request, env, userId, revisionDate);
   const attachments = await storage.getAttachmentsByCipher(cipher.id);
+  const responseOptions = cipherResponseOptionsForRequest(request);
 
   return jsonResponse(
-    cipherToResponse(cipher, attachments)
+    cipherToResponse(cipher, attachments, responseOptions)
   );
 }
 
@@ -584,9 +949,14 @@ export async function handleDeleteCipher(request: Request, env: Env, userId: str
   await storage.saveCipher(cipher);
   const revisionDate = await storage.updateRevisionDate(userId);
   notifyVaultSyncForRequest(request, env, userId, revisionDate);
+  await writeCipherAudit(storage, request, userId, 'cipher.delete.soft', {
+    id: cipher.id,
+    type: cipher.type,
+    folderId: cipher.folderId ?? null,
+  });
 
   return jsonResponse(
-    cipherToResponse(cipher, [])
+    cipherToResponse(cipher, [], cipherResponseOptionsForRequest(request))
   );
 }
 
@@ -608,6 +978,12 @@ export async function handleDeleteCipherCompat(request: Request, env: Env, userI
     await storage.deleteCipher(id, userId);
     const revisionDate = await storage.updateRevisionDate(userId);
     notifyVaultSyncForRequest(request, env, userId, revisionDate);
+    await writeCipherAudit(storage, request, userId, 'cipher.delete.permanent', {
+      id,
+      type: cipher.type,
+      folderId: cipher.folderId ?? null,
+      compat: true,
+    });
     return new Response(null, { status: 204 });
   }
 
@@ -629,6 +1005,11 @@ export async function handlePermanentDeleteCipher(request: Request, env: Env, us
   await storage.deleteCipher(id, userId);
   const revisionDate = await storage.updateRevisionDate(userId);
   notifyVaultSyncForRequest(request, env, userId, revisionDate);
+  await writeCipherAudit(storage, request, userId, 'cipher.delete.permanent', {
+    id,
+    type: cipher.type,
+    folderId: cipher.folderId ?? null,
+  });
 
   return new Response(null, { status: 204 });
 }
@@ -650,7 +1031,7 @@ export async function handleRestoreCipher(request: Request, env: Env, userId: st
   notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   return jsonResponse(
-    cipherToResponse(cipher, [])
+    cipherToResponse(cipher, [], cipherResponseOptionsForRequest(request))
   );
 }
 
@@ -689,7 +1070,7 @@ export async function handlePartialUpdateCipher(request: Request, env: Env, user
   notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   return jsonResponse(
-    cipherToResponse(cipher, [])
+    cipherToResponse(cipher, [], cipherResponseOptionsForRequest(request))
   );
 }
 
@@ -733,7 +1114,7 @@ async function buildCipherListResponse(
 
   return jsonResponse({
     data: ciphers.map((cipher) =>
-      cipherToResponse(cipher, attachmentsByCipher.get(cipher.id) || [])
+      cipherToResponse(cipher, attachmentsByCipher.get(cipher.id) || [], cipherResponseOptionsForRequest(request))
     ),
     object: 'list',
     continuationToken: null,
@@ -766,7 +1147,7 @@ export async function handleArchiveCipher(request: Request, env: Env, userId: st
 
   const attachments = await storage.getAttachmentsByCipher(cipher.id);
   return jsonResponse(
-    cipherToResponse(cipher, attachments)
+    cipherToResponse(cipher, attachments, cipherResponseOptionsForRequest(request))
   );
 }
 
@@ -788,7 +1169,7 @@ export async function handleUnarchiveCipher(request: Request, env: Env, userId: 
 
   const attachments = await storage.getAttachmentsByCipher(cipher.id);
   return jsonResponse(
-    cipherToResponse(cipher, attachments)
+    cipherToResponse(cipher, attachments, cipherResponseOptionsForRequest(request))
   );
 }
 
@@ -858,6 +1239,9 @@ export async function handleBulkDeleteCiphers(request: Request, env: Env, userId
   const revisionDate = await storage.bulkSoftDeleteCiphers(body.ids, userId);
   if (revisionDate) {
     notifyVaultSyncForRequest(request, env, userId, revisionDate);
+    await writeCipherAudit(storage, request, userId, 'cipher.delete.soft.bulk', {
+      count: body.ids.length,
+    });
   }
 
   return new Response(null, { status: 204 });
@@ -917,6 +1301,10 @@ export async function handleBulkPermanentDeleteCiphers(request: Request, env: En
   const revisionDate = await storage.bulkDeleteCiphers(ownedIds, userId);
   if (revisionDate) {
     notifyVaultSyncForRequest(request, env, userId, revisionDate);
+    await writeCipherAudit(storage, request, userId, 'cipher.delete.permanent.bulk', {
+      count: ownedIds.length,
+      requestedCount: ids.length,
+    });
   }
 
   return new Response(null, { status: 204 });

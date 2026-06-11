@@ -45,6 +45,7 @@ interface VaultPageProps {
   onDelete: (cipher: Cipher) => Promise<void>;
   onArchive: (cipher: Cipher) => Promise<void>;
   onUnarchive: (cipher: Cipher) => Promise<void>;
+  onRestore: (ids: string[]) => Promise<void>;
   onBulkDelete: (ids: string[]) => Promise<void>;
   onBulkPermanentDelete: (ids: string[]) => Promise<void>;
   onBulkRestore: (ids: string[]) => Promise<void>;
@@ -305,9 +306,10 @@ export default function VaultPage(props: VaultPageProps) {
       const name = String(cipher.decName || cipher.name || '');
       const username = String(cipher.login?.decUsername || '');
       const uri = firstCipherUri(cipher);
+      const cipherId = String(cipher.id || '').trim();
       meta.set(cipher.id, {
         name,
-        searchText: `${name}\n${username}\n${uri}`.toLowerCase(),
+        searchText: `${cipherId}\n${cipherId.replace(/-/g, '')}\n${name}\n${username}\n${uri}`.toLowerCase(),
         firstUri: uri,
         typeKey: cipherTypeKey(Number(cipher.type || 1)),
         sortTime: sortTimeValue(cipher),
@@ -714,6 +716,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       setAttachmentQueue([]);
       setRemovedAttachmentIds({});
       if (isMobileLayout) setMobilePanel('detail');
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -727,6 +731,22 @@ const folderName = useCallback((id: string | null | undefined): string => {
       setPendingDelete(null);
       cancelEdit();
       if (isMobileLayout) setMobilePanel('list');
+    } catch {
+      // The action layer already shows the user-facing error toast.
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRestoreSelected(cipher: Cipher): Promise<void> {
+    setBusy(true);
+    try {
+      await props.onRestore([cipher.id]);
+      if (isMobileLayout && selectedCipherId === cipher.id) {
+        setMobilePanel('list');
+      }
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -746,6 +766,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       }
       setSelectedMap({});
       setBulkDeleteOpen(false);
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -762,6 +784,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       await props.onBulkMove(ids, folderId);
       setSelectedMap({});
       setMoveOpen(false);
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -771,6 +795,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
     setBusy(true);
     try {
       await props.onRefresh();
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -805,6 +831,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       await props.onCreateFolder(newFolderName);
       setCreateFolderOpen(false);
       setNewFolderName('');
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -819,6 +847,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
         setSidebarFilter({ kind: 'all' });
       }
       setPendingDeleteFolder(null);
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -836,6 +866,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       await props.onRenameFolder(pendingRenameFolder.id, nextName);
       setPendingRenameFolder(null);
       setRenameFolderName('');
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -850,6 +882,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
     try {
       await props.onBulkRestore(ids);
       setSelectedMap({});
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -864,6 +898,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       if (isMobileLayout && selectedCipherId === pendingArchive.id) {
         setMobilePanel('list');
       }
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -878,6 +914,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
         delete next[cipher.id];
         return next;
       });
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -893,6 +931,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       await props.onBulkArchive(ids);
       setSelectedMap({});
       setBulkArchiveOpen(false);
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -907,6 +947,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
     try {
       await props.onBulkUnarchive(ids);
       setSelectedMap({});
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -921,6 +963,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
         setSidebarFilter({ kind: 'all' });
       }
       setDeleteAllFoldersOpen(false);
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -1148,6 +1192,7 @@ const folderName = useCallback((id: string | null | undefined): string => {
                 attachmentDownloadPercent={props.attachmentDownloadPercent}
                 onStartEdit={startEdit}
                 onDelete={setPendingDelete}
+                onRestore={(cipher) => void handleRestoreSelected(cipher)}
                 onArchive={(cipher) => setPendingArchive(cipher)}
                 onUnarchive={(cipher) => void handleUnarchiveSelected(cipher)}
               />

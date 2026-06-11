@@ -11,14 +11,15 @@
 }
 
 .input {
-  @apply h-12 w-full rounded-xl border px-3.5 py-2.5 text-base text-ink outline-none transition;
+  @apply h-12 w-full rounded-xl border px-3.5 py-2.5 text-base leading-normal text-ink outline-none transition;
   background: var(--panel);
   border-color: rgba(74, 103, 150, 0.34);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 select.input {
-  @apply pr-[42px];
+  @apply py-0 pr-[42px];
+  line-height: 1.5;
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -103,13 +104,14 @@ input[type='file'].input::file-selector-button:hover {
 }
 
 .eye-btn {
-  @apply absolute bottom-2.5 right-2.5 grid h-8 w-8 cursor-pointer place-items-center border-0 bg-transparent text-slate-700 transition;
+  @apply absolute right-2.5 top-1/2 grid h-8 w-8 cursor-pointer place-items-center border-0 bg-transparent text-slate-700 transition;
+  transform: translateY(-50%);
 }
 
 .password-toggle:hover,
 .eye-btn:hover {
   color: var(--primary);
-  transform: translateY(-1px) scale(1.04);
+  transform: translateY(-50%) scale(1.04);
 }
 
 .btn {

@@ -11,6 +11,10 @@ import {
   handleGetTotpStatus,
   handleSetTotpStatus,
   handleGetTotpRecoveryCode,
+  handleGetTwoFactorProviders,
+  handleGetTwoFactorAuthenticator,
+  handlePutTwoFactorAuthenticator,
+  handleDisableTwoFactorProvider,
   handleGetApiKey,
   handleRotateApiKey,
 } from './handlers/accounts';
@@ -66,6 +70,14 @@ import {
 import { handleAuthenticatedDeviceRoute } from './router-devices';
 import { handleAdminRoute } from './router-admin';
 import { handleGetDomains, handleUpdateDomains } from './handlers/domains';
+import {
+  handleCreateAccountPasskeyCredential,
+  handleDeleteAccountPasskeyCredential,
+  handleGetAccountPasskeyAttestationOptions,
+  handleGetAccountPasskeyCredentials,
+  handleGetAccountPasskeyUpdateAssertionOptions,
+  handleUpdateAccountPasskeyEncryption,
+} from './handlers/account-passkeys';
 
 export async function handleAuthenticatedRoute(
   request: Request,
@@ -111,6 +123,25 @@ export async function handleAuthenticatedRoute(
     return handleGetTotpRecoveryCode(request, env, userId);
   }
 
+  if (path === '/api/two-factor') {
+    if (method === 'GET') return handleGetTwoFactorProviders(request, env, userId);
+    return errorResponse('Method not allowed', 405);
+  }
+
+  if (path === '/api/two-factor/get-authenticator' && method === 'POST') {
+    return handleGetTwoFactorAuthenticator(request, env, userId);
+  }
+
+  if (path === '/api/two-factor/authenticator') {
+    if (method === 'PUT' || method === 'POST') return handlePutTwoFactorAuthenticator(request, env, userId);
+    if (method === 'DELETE') return handleDisableTwoFactorProvider(request, env, userId);
+    return errorResponse('Method not allowed', 405);
+  }
+
+  if (path === '/api/two-factor/disable' && (method === 'PUT' || method === 'POST')) {
+    return handleDisableTwoFactorProvider(request, env, userId);
+  }
+
   if (path === '/api/accounts/revision-date' && method === 'GET') {
     return handleGetRevisionDate(request, env, userId);
   }
@@ -129,6 +160,28 @@ export async function handleAuthenticatedRoute(
 
   if ((path === '/api/accounts/rotate-api-key' || path === '/api/accounts/rotate_api_key') && method === 'POST') {
     return handleRotateApiKey(request, env, userId);
+  }
+
+  if (path === '/api/webauthn' || path === '/webauthn') {
+    if (method === 'GET') return handleGetAccountPasskeyCredentials(request, env, userId);
+    if (method === 'POST') return handleCreateAccountPasskeyCredential(request, env, userId);
+    if (method === 'PUT') return handleUpdateAccountPasskeyEncryption(request, env, userId);
+    return errorResponse('Method not allowed', 405);
+  }
+
+  if ((path === '/api/webauthn/attestation-options' || path === '/webauthn/attestation-options') && method === 'POST') {
+    return handleGetAccountPasskeyAttestationOptions(request, env, userId, currentUser);
+  }
+
+  if ((path === '/api/webauthn/assertion-options' || path === '/webauthn/assertion-options') && method === 'POST') {
+    return handleGetAccountPasskeyUpdateAssertionOptions(request, env, userId, currentUser);
+  }
+
+  const accountPasskeyDeleteMatch =
+    path.match(/^\/api\/webauthn\/([^/]+)\/delete$/i) ||
+    path.match(/^\/webauthn\/([^/]+)\/delete$/i);
+  if (accountPasskeyDeleteMatch && method === 'POST') {
+    return handleDeleteAccountPasskeyCredential(request, env, userId, accountPasskeyDeleteMatch[1], currentUser);
   }
 
   if (path === '/api/sync' && method === 'GET') {
