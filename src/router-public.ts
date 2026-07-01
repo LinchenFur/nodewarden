@@ -8,6 +8,7 @@ import {
   handleDownloadSendFile,
 } from './handlers/sends';
 import { handleKnownDevice } from './handlers/devices';
+import { handleFillAssistForms, handleFillAssistManifest } from './handlers/fill-assist';
 import { handleToken, handlePrelogin, handleRevocation } from './handlers/identity';
 import { handleGetAccountPasskeyAssertionOptions } from './handlers/account-passkeys';
 import {
@@ -27,6 +28,7 @@ import {
   handleNotificationsNegotiate,
 } from './handlers/notifications';
 import { handlePublicUploadSendFile } from './handlers/sends';
+import { isSafeWebsiteIconContentType } from './utils/content-type';
 import { jsonResponse } from './utils/response';
 import { StorageService } from './services/storage';
 import type { Env } from './types';
@@ -96,6 +98,7 @@ function buildIconServiceCsp(origin: string): string {
 }
 
 function buildConfigResponse(origin: string) {
+  const fillAssistBase = `${origin}/fill-assist`;
   return {
     version: LIMITS.compatibility.bitwardenServerVersion,
     gitHash: 'nodewarden',
@@ -108,7 +111,7 @@ function buildConfigResponse(origin: string) {
       notifications: origin + '/notifications',
       icons: origin,
       sso: '',
-      fillAssistRules: null,
+      fillAssistRules: fillAssistBase,
     },
     push: {
       pushTechnology: 0,
@@ -124,8 +127,11 @@ function buildConfigResponse(origin: string) {
       'cipher-key-encryption': LIMITS.compatibility.cipherKeyEncryptionFeatureEnabled,
       'duo-redirect': true,
       'email-verification': true,
+      'fill-assist-targeting-rules': true,
       'pm-19051-send-email-verification': false,
       'pm-19148-innovation-archive': true,
+      'pm-4516-devices-add-last-activity-date': true,
+      'pm-30529-webauthn-related-origins': true,
       'unauth-ui-refresh': true,
       'web-push': false,
     },
@@ -241,6 +247,7 @@ function iconResponse(body: BodyInit | null, contentType: string | null): Respon
     headers: {
       'Content-Type': contentType || 'image/png',
       'Cache-Control': `public, max-age=${LIMITS.cache.iconTtlSeconds}, immutable`,
+      'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; sandbox",
     },
   });
 }
@@ -272,7 +279,7 @@ async function handleWebsiteIcon(host: string, fallbackMode: 'default' | 'not-fo
 
       if (!resp.ok) continue;
       const contentType = String(resp.headers.get('Content-Type') || '').toLowerCase();
-      if (!contentType.startsWith('image/')) continue;
+      if (!isSafeWebsiteIconContentType(contentType)) continue;
 
       const contentLength = getPositiveContentLength(resp.headers);
       if (contentLength !== null && contentLength > ICON_MAX_BUFFER_BYTES) continue;
@@ -338,6 +345,19 @@ export async function handlePublicRoute(
     const blocked = await enforcePublicRateLimit('public-read', LIMITS.rateLimit.publicReadRequestsPerMinute);
     if (blocked) return blocked;
     return jsonResponse(await buildWebBootstrapResponse(env));
+  }
+
+  if (path === '/fill-assist/manifest.json' && method === 'GET') {
+    const blocked = await enforcePublicRateLimit('public-read', LIMITS.rateLimit.publicReadRequestsPerMinute);
+    if (blocked) return blocked;
+    return handleFillAssistManifest();
+  }
+
+  const fillAssistFormsMatch = path.match(/^\/fill-assist\/([^/]+)$/i);
+  if (fillAssistFormsMatch && method === 'GET') {
+    const blocked = await enforcePublicRateLimit('public-read', LIMITS.rateLimit.publicReadRequestsPerMinute);
+    if (blocked) return blocked;
+    return handleFillAssistForms(fillAssistFormsMatch[1]);
   }
 
   const iconMatch = path.match(/^\/icons\/([^/]+)\/icon\.png$/i);
@@ -467,7 +487,7 @@ export async function handlePublicRoute(
     const blocked = await enforcePublicRateLimit('public-read', LIMITS.rateLimit.publicReadRequestsPerMinute);
     if (blocked) return blocked;
     const origin = new URL(request.url).origin;
-    return jsonResponse(buildConfigResponse(origin));
+    return jsonResponse(buildConfigResponse(origin), 200, { 'Cache-Control': 'no-store' });
   }
 
   if (path === '/api/version' && method === 'GET') {
