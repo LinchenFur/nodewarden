@@ -612,6 +612,29 @@ const ru: Record<string, string> = {
   "txt_favorite": "Любимый",
   "txt_favorites": "Избранное",
   "txt_duplicates": "Дубликаты",
+  "txt_new_organization": "New organization",
+  "txt_organizations": "Organizations",
+  "txt_manage_organization": "Manage organization",
+  "txt_members": "Members",
+  "txt_invite": "Invite",
+  "txt_invited": "Invited",
+  "txt_accepted": "Accepted",
+  "txt_confirmed": "Confirmed",
+  "txt_share_to_organization": "Share to organization",
+  "txt_share": "Share",
+  "txt_shared": "Shared",
+  "txt_collections": "Collections",
+  "txt_no_collections": "No collections",
+  "txt_select_organization": "Select an organization",
+  "txt_select_collection": "Select a collection",
+  "txt_organization_name": "Organization name",
+  "txt_organization_name_required": "Organization name is required",
+  "txt_new_organization_subtitle": "Create a shared space to organize and share logins.",
+  "txt_organization_name_placeholder": "e.g. Family, Team",
+  "txt_collection_name_placeholder": "Default collection",
+  "txt_collection_name_help": "Shared items are stored in collections. Leave blank to use the default name.",
+  "txt_collection_name": "First collection name",
+  "txt_organization_created": "Organization created",
   "txt_duplicate_detection_mode": "Сравнивать по",
   "txt_duplicate_mode_exact": "Полное совпадение",
   "txt_duplicate_mode_login_site": "Сайт + логин + пароль",
@@ -1454,7 +1477,9 @@ const ru: Record<string, string> = {
   "txt_auth_request_update_failed": "Не удалось обновить запрос входа с устройства",
   "txt_auth_request_approved": "Вход с устройства подтвержден",
   "txt_auth_request_denied": "Вход с устройства отклонен",
-  "txt_auth_request_missing_public_key": "В запросе входа с устройства отсутствует открытый ключ"
+  "txt_auth_request_missing_public_key": "В запросе входа с устройства отсутствует открытый ключ",
+  "txt_create_subfolder": "Создать подпапку",
+  "txt_nested_folder_help": "Используйте / для вложенных папок, например Работа/Почта. Сначала создайте родительскую папку. Переименование папки не переименовывает её подпапки.",
 };
 
 Object.assign(ru, {
@@ -1464,5 +1489,49 @@ Object.assign(ru, {
 Object.assign(ru, { "txt_password_security_last_checked": "Последняя проверка: {value}" });
 Object.assign(ru, { "txt_no_password_risks_in_filter": "В этой категории нет рисков для паролей" });
 Object.assign(ru, { "txt_password_security_show_all": "Show all", "txt_password_security_hide_all": "Hide all", "txt_password_security_jump": "Go to item", "txt_password_security_exposed_short": "Exposed {count} times", "txt_password_security_weak_short": "Weak password", "txt_password_security_reused_short": "Reused" });
+
+Object.assign(ru, {
+  "txt_access_password_optional": "Пароль доступа (необязательно)",
+  "txt_collection_hint": "Коллекции объединяют общие элементы. Участники видят элементы в своих коллекциях.",
+  "txt_collection_name_short": "Название коллекции",
+  "txt_expiration_days": "Срок действия (дней)",
+  "txt_generate_link": "Создать ссылку",
+  "txt_include_live_2fa": "Добавить актуальный код 2FA",
+  "txt_invite_member_hint": "Пригласите участника по электронной почте, затем подтвердите его после принятия приглашения.",
+  "txt_member_email_placeholder": "member@example.com",
+  "txt_no_members": "Участников пока нет.",
+  "txt_share_as_link": "Поделиться ссылкой",
+  "txt_share_link_ready": "Ссылка готова. Любой, у кого есть ссылка, может просматривать её до истечения срока.",
+  "txt_share_link_totp_note": "Ссылка показывает код 2FA, который обновляется автоматически.",
+  "txt_share_login_hint": "Создаёт ссылку. Любой, у кого есть ссылка, сможет увидеть пароль и, если включено, актуальный код 2FA.",
+  "txt_shared_login": "Общий вход",
+  "txt_done": "Готово",
+});
+
+Object.assign(ru, {
+  "txt_accepted": "Принято",
+  "txt_collection_name": "Название первой коллекции",
+  "txt_collection_name_help": "Общие элементы хранятся в коллекциях. Оставьте пустым, чтобы использовать название по умолчанию.",
+  "txt_collection_name_placeholder": "Коллекция по умолчанию",
+  "txt_collections": "Коллекции",
+  "txt_confirmed": "Подтверждено",
+  "txt_invite": "Пригласить",
+  "txt_invited": "Приглашён",
+  "txt_manage_organization": "Управление организацией",
+  "txt_members": "Участники",
+  "txt_new_organization": "Новая организация",
+  "txt_new_organization_subtitle": "Создайте общее пространство для организации и обмена логинами.",
+  "txt_no_collections": "Нет коллекций",
+  "txt_organization_created": "Организация создана",
+  "txt_organization_name": "Название организации",
+  "txt_organization_name_placeholder": "например, Семья, Команда",
+  "txt_organization_name_required": "Укажите название организации",
+  "txt_organizations": "Организации",
+  "txt_select_collection": "Выберите коллекцию",
+  "txt_select_organization": "Выберите организацию",
+  "txt_share": "Поделиться",
+  "txt_share_to_organization": "Поделиться с организацией",
+  "txt_shared": "Общий доступ",
+});
 
 export default ru;

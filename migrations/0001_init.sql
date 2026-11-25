@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS users (
   totp_secret TEXT,
   totp_recovery_code TEXT,
   api_key TEXT,
+  user_key_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -294,3 +295,66 @@ CREATE TABLE IF NOT EXISTS used_attachment_download_tokens (
   jti TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL
 );
+
+-- Organizations / Collections (MVP)
+CREATE TABLE IF NOT EXISTS organizations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  billing_email TEXT,
+  public_key TEXT NOT NULL,
+  private_key TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS org_memberships (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',
+  status INTEGER NOT NULL DEFAULT 0,
+  key TEXT,
+  access_all INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_memberships_org_user ON org_memberships(organization_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_org_memberships_user ON org_memberships(user_id);
+
+CREATE TABLE IF NOT EXISTS collections (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  external_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collections_org ON collections(organization_id);
+
+CREATE TABLE IF NOT EXISTS collection_users (
+  collection_id TEXT NOT NULL,
+  membership_id TEXT NOT NULL,
+  read_only INTEGER NOT NULL DEFAULT 0,
+  hide_passwords INTEGER NOT NULL DEFAULT 0,
+  manage INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (collection_id, membership_id),
+  FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+  FOREIGN KEY (membership_id) REFERENCES org_memberships(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collection_users_membership ON collection_users(membership_id);
+
+CREATE TABLE IF NOT EXISTS cipher_collections (
+  cipher_id TEXT NOT NULL,
+  collection_id TEXT NOT NULL,
+  PRIMARY KEY (cipher_id, collection_id),
+  FOREIGN KEY (cipher_id) REFERENCES ciphers(id) ON DELETE CASCADE,
+  FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_cipher_collections_collection ON cipher_collections(collection_id);
+
+-- ciphers.organization_id is added via ALTER in storage-schema.ts for existing installs.
+ALTER TABLE ciphers ADD COLUMN organization_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_ciphers_organization ON ciphers(organization_id);

@@ -612,6 +612,29 @@ const sv: Record<string, string> = {
   "txt_favorite": "Favorit",
   "txt_favorites": "Favoriter",
   "txt_duplicates": "Dubbletter",
+  "txt_new_organization": "New organization",
+  "txt_organizations": "Organizations",
+  "txt_manage_organization": "Manage organization",
+  "txt_members": "Members",
+  "txt_invite": "Invite",
+  "txt_invited": "Invited",
+  "txt_accepted": "Accepted",
+  "txt_confirmed": "Confirmed",
+  "txt_share_to_organization": "Share to organization",
+  "txt_share": "Share",
+  "txt_shared": "Shared",
+  "txt_collections": "Collections",
+  "txt_no_collections": "No collections",
+  "txt_select_organization": "Select an organization",
+  "txt_select_collection": "Select a collection",
+  "txt_organization_name": "Organization name",
+  "txt_organization_name_required": "Organization name is required",
+  "txt_new_organization_subtitle": "Create a shared space to organize and share logins.",
+  "txt_organization_name_placeholder": "e.g. Family, Team",
+  "txt_collection_name_placeholder": "Default collection",
+  "txt_collection_name_help": "Shared items are stored in collections. Leave blank to use the default name.",
+  "txt_collection_name": "First collection name",
+  "txt_organization_created": "Organization created",
   "txt_duplicate_detection_mode": "Matcha efter",
   "txt_duplicate_mode_exact": "Exakt objekt",
   "txt_duplicate_mode_login_site": "Sida + användarnamn + lösenord",
@@ -1454,7 +1477,9 @@ const sv: Record<string, string> = {
   "txt_auth_request_approved": "Enhetsinloggning godkänd",
   "txt_auth_request_denied": "Enhetsinloggning nekad",
   "txt_auth_request_missing_public_key": "Inloggningsförfrågan för enhet saknar en offentlig nyckel",
-  "txt_ip_address": "IP-adress"
+  "txt_ip_address": "IP-adress",
+  "txt_create_subfolder": "Skapa undermapp",
+  "txt_nested_folder_help": "Använd / för att skapa nästlade mappar, t.ex. Arbete/E-post. Skapa först den överordnade mappen. Att byta namn på en mapp ändrar inte namnen på dess undermappar.",
 };
 
 Object.assign(sv, {
@@ -1464,5 +1489,50 @@ Object.assign(sv, {
 Object.assign(sv, { "txt_password_security_last_checked": "Senast kontrollerad: {value}" });
 Object.assign(sv, { "txt_no_password_risks_in_filter": "Inga lösenordsrisker i denna kategori" });
 Object.assign(sv, { "txt_password_security_show_all": "Show all", "txt_password_security_hide_all": "Hide all", "txt_password_security_jump": "Go to item", "txt_password_security_exposed_short": "Exposed {count} times", "txt_password_security_weak_short": "Weak password", "txt_password_security_reused_short": "Reused" });
+
+Object.assign(sv, {
+  "txt_access_password_optional": "Åtkomstlösenord (valfritt)",
+  "txt_collection_hint": "Samlingar grupperar delade objekt. Medlemmar ser objekt i sina samlingar.",
+  "txt_collection_name_short": "Samlingens namn",
+  "txt_expiration_days": "Upphör efter (dagar)",
+  "txt_generate_link": "Skapa länk",
+  "txt_include_live_2fa": "Inkludera aktuell 2FA-kod",
+  "txt_invite_member_hint": "Bjud in en medlem via e-post och bekräfta sedan när personen accepterar.",
+  "txt_member_email_placeholder": "member@example.com",
+  "txt_no_members": "Inga medlemmar ännu.",
+  "txt_share_as_link": "Dela som länk",
+  "txt_share_link_ready": "Länken är klar. Alla med länken kan visa den tills den upphör.",
+  "txt_share_link_totp_note": "Länken visar en 2FA-kod som uppdateras automatiskt.",
+  "txt_share_login_hint": "Skapar en länk. Alla med länken kan se lösenordet och, om det ingår, en aktuell 2FA-kod.",
+  "txt_shared_login": "Delad inloggning",
+  "txt_done": "Klart",
+});
+
+Object.assign(sv, {
+  "txt_accepted": "Accepterad",
+  "txt_collection_name": "Namnet på den första samlingen",
+  "txt_collection_name_help": "Delade objekt lagras i samlingar. Lämna tomt för att använda standardnamnet.",
+  "txt_collection_name_placeholder": "Standardsamling",
+  "txt_collections": "Samlingar",
+  "txt_confirmed": "Bekräftad",
+  "txt_invite": "Bjud in",
+  "txt_invited": "Inbjuden",
+  "txt_manage_organization": "Hantera organisation",
+  "txt_members": "Medlemmar",
+  "txt_new_organization": "Ny organisation",
+  "txt_new_organization_subtitle": "Skapa ett delat utrymme för att organisera och dela inloggningar.",
+  "txt_no_collections": "Inga samlingar",
+  "txt_organization_created": "Organisation skapad",
+  "txt_organization_name": "Organisationsnamn",
+  "txt_organization_name_placeholder": "t.ex. Familj, Team",
+  "txt_organization_name_required": "Organisationsnamn krävs",
+  "txt_organizations": "Organisationer",
+  "txt_select_collection": "Välj en samling",
+  "txt_select_organization": "Välj en organisation",
+  "txt_share": "Dela",
+  "txt_share_to_organization": "Dela med organisation",
+  "txt_shared": "Delad",
+  "txt_oauth_client_credentials": "OAuth-klientens inloggningsuppgifter",
+});
 
 export default sv;

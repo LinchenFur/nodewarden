@@ -612,6 +612,29 @@ const de: Record<string, string> = {
   "txt_favorite": "Favorit",
   "txt_favorites": "Favoriten",
   "txt_duplicates": "Duplikate",
+  "txt_new_organization": "New organization",
+  "txt_organizations": "Organizations",
+  "txt_manage_organization": "Manage organization",
+  "txt_members": "Members",
+  "txt_invite": "Invite",
+  "txt_invited": "Invited",
+  "txt_accepted": "Accepted",
+  "txt_confirmed": "Confirmed",
+  "txt_share_to_organization": "Share to organization",
+  "txt_share": "Share",
+  "txt_shared": "Shared",
+  "txt_collections": "Collections",
+  "txt_no_collections": "No collections",
+  "txt_select_organization": "Select an organization",
+  "txt_select_collection": "Select a collection",
+  "txt_organization_name": "Organization name",
+  "txt_organization_name_required": "Organization name is required",
+  "txt_new_organization_subtitle": "Create a shared space to organize and share logins.",
+  "txt_organization_name_placeholder": "e.g. Family, Team",
+  "txt_collection_name_placeholder": "Default collection",
+  "txt_collection_name_help": "Shared items are stored in collections. Leave blank to use the default name.",
+  "txt_collection_name": "First collection name",
+  "txt_organization_created": "Organization created",
   "txt_duplicate_detection_mode": "Übereinstimmung nach",
   "txt_duplicate_mode_exact": "Exakter Eintrag",
   "txt_duplicate_mode_login_site": "Website + Benutzername + Passwort",
@@ -1454,7 +1477,9 @@ const de: Record<string, string> = {
   "txt_auth_request_approved": "Geräteanmeldung genehmigt",
   "txt_auth_request_denied": "Geräteanmeldung abgelehnt",
   "txt_auth_request_missing_public_key": "Geräteanmeldungsanfrage fehlt ein öffentlicher Schlüssel",
-  "txt_ip_address": "IP-Adresse"
+  "txt_ip_address": "IP-Adresse",
+  "txt_create_subfolder": "Unterordner erstellen",
+  "txt_nested_folder_help": "Mit / Ordner verschachteln, z. B. Arbeit/E-Mail. Erstellen Sie zuerst den übergeordneten Ordner. Das Umbenennen eines Ordners benennt seine Unterordner nicht um.",
 };
 
 Object.assign(de, {
@@ -1464,5 +1489,50 @@ Object.assign(de, {
 Object.assign(de, { "txt_password_security_last_checked": "Zuletzt überprüft: {value}" });
 Object.assign(de, { "txt_no_password_risks_in_filter": "Keine Passwortrisiken in dieser Kategorie" });
 Object.assign(de, { "txt_password_security_show_all": "Alle anzeigen", "txt_password_security_hide_all": "Alle ausblenden", "txt_password_security_jump": "Öffnen", "txt_password_security_exposed_short": "{count}-mal geleakt", "txt_password_security_weak_short": "Schwaches Passwort", "txt_password_security_reused_short": "Wiederverwendet" });
+
+Object.assign(de, {
+  "txt_access_password_optional": "Zugangspasswort (optional)",
+  "txt_collection_hint": "Sammlungen bündeln gemeinsam genutzte Einträge. Mitglieder sehen Einträge in ihren Sammlungen.",
+  "txt_collection_name_short": "Sammlungsname",
+  "txt_expiration_days": "Läuft ab nach (Tagen)",
+  "txt_generate_link": "Link erstellen",
+  "txt_include_live_2fa": "Aktuellen 2FA-Code einschließen",
+  "txt_invite_member_hint": "Laden Sie ein Mitglied per E-Mail ein und bestätigen Sie es nach der Annahme.",
+  "txt_member_email_placeholder": "member@example.com",
+  "txt_no_members": "Noch keine Mitglieder.",
+  "txt_share_as_link": "Als Link teilen",
+  "txt_share_link_ready": "Link bereit. Jeder mit diesem Link kann ihn bis zum Ablauf ansehen.",
+  "txt_share_link_totp_note": "Der Link zeigt einen 2FA-Code, der automatisch aktualisiert wird.",
+  "txt_share_login_hint": "Erstellt einen Link. Jeder mit dem Link kann das Passwort und, falls enthalten, einen aktuellen 2FA-Code sehen.",
+  "txt_shared_login": "Geteilter Login",
+  "txt_done": "Fertig",
+});
+
+Object.assign(de, {
+  "txt_accepted": "Akzeptiert",
+  "txt_collection_name": "Name der ersten Sammlung",
+  "txt_collection_name_help": "Gemeinsam genutzte Einträge werden in Sammlungen gespeichert. Leer lassen, um den Standardnamen zu verwenden.",
+  "txt_collection_name_placeholder": "Standardsammlung",
+  "txt_collections": "Sammlungen",
+  "txt_confirmed": "Bestätigt",
+  "txt_invite": "Einladen",
+  "txt_invited": "Eingeladen",
+  "txt_manage_organization": "Organisation verwalten",
+  "txt_members": "Mitglieder",
+  "txt_new_organization": "Neue Organisation",
+  "txt_new_organization_subtitle": "Einen gemeinsamen Bereich zum Organisieren und Teilen von Logins erstellen.",
+  "txt_no_collections": "Keine Sammlungen",
+  "txt_organization_created": "Organisation erstellt",
+  "txt_organization_name": "Organisationsname",
+  "txt_organization_name_placeholder": "z. B. Familie, Team",
+  "txt_organization_name_required": "Organisationsname ist erforderlich",
+  "txt_organizations": "Organisationen",
+  "txt_select_collection": "Sammlung auswählen",
+  "txt_select_organization": "Organisation auswählen",
+  "txt_share": "Teilen",
+  "txt_share_to_organization": "Mit Organisation teilen",
+  "txt_shared": "Geteilt",
+  "txt_role_admin": "Verwaltung",
+});
 
 export default de;

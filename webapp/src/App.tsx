@@ -3,6 +3,10 @@ import { useLocation } from 'wouter';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppAuthenticatedShell from '@/components/AppAuthenticatedShell';
 import AppGlobalOverlays, { type AppConfirmState } from '@/components/AppGlobalOverlays';
+import OrganizationCreateDialog from '@/components/OrganizationCreateDialog';
+import ShareCipherDialog from '@/components/ShareCipherDialog';
+import ShareLoginDialog from '@/components/ShareLoginDialog';
+import OrganizationManagePage from '@/components/OrganizationManagePage';
 import AuthRequestApprovalDialog from '@/components/AuthRequestApprovalDialog';
 import AuthViews from '@/components/AuthViews';
 import NotFoundPage from '@/components/NotFoundPage';
@@ -69,7 +73,8 @@ import { APP_NOTIFY_EVENT, type AppNotifyDetail } from '@/lib/app-notify';
 import { dispatchBackupProgress, type BackupProgressDetail } from '@/lib/backup-restore-progress';
 import { clearOfflineUnlockRecord } from '@/lib/offline-auth';
 import { clearPasswordSecurityCache } from '@/lib/password-security-cache';
-import { decryptSends, decryptVaultCore } from '@/lib/vault-decrypt';
+import { decryptSends, decryptVaultCore, decryptOrganizations } from '@/lib/vault-decrypt';
+import { base64ToBytes, decryptUserPrivateKey, bytesToBase64 as bytesToBase64ForOrg } from '@/lib/crypto';
 import { decryptSendsInWorker, decryptVaultCoreInWorker } from '@/lib/vault-worker';
 import {
   DEMO_CIPHERS,
@@ -85,7 +90,10 @@ import {
   createDemoMainRoutesProps,
 } from '@/lib/demo';
 import type { AdminBackupSettings } from '@/lib/api/backup';
-import type { AdminInvite, AdminUser, AppPhase, AuditLogSettings, AuthRequest, AuthorizedDevice, Cipher, CustomEquivalentDomain, DomainRules, Folder as VaultFolder, Profile, Send, SessionState } from '@/lib/types';
+import type { AdminInvite, AdminUser, AppPhase, AuditLogSettings, AuthRequest, AuthorizedDevice, Cipher, CustomEquivalentDomain, DomainRules, Folder as VaultFolder, Profile, Send, SessionState,
+  OrgProfile,
+  OrgCollection,
+} from '@/lib/types';
 import type { VaultCoreSnapshot } from '@/lib/vault-cache';
 
 function isBackupProgressDetail(value: unknown): value is BackupProgressDetail {
@@ -207,6 +215,10 @@ export default function App() {
   const [location, navigate] = useLocation();
   const [phase, setPhase] = useState<AppPhase>(initialBootstrap.phase);
   const [session, setSessionState] = useState<SessionState | null>(initialBootstrap.session);
+  const [orgDialogOpen, setOrgDialogOpen] = useState(false);
+  const [shareCipherTarget, setShareCipherTarget] = useState<Cipher | null>(null);
+  const [shareLoginTarget, setShareLoginTarget] = useState<Cipher | null>(null);
+  const [manageOrgId, setManageOrgId] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(initialProfileSnapshot);
   const [defaultKdfIterations, setDefaultKdfIterations] = useState(initialBootstrap.defaultKdfIterations);
   const [registrationInviteRequired, setRegistrationInviteRequired] = useState(initialBootstrap.registrationInviteRequired);
@@ -261,6 +273,11 @@ export default function App() {
   const [mobileSidebarToggleKey, setMobileSidebarToggleKey] = useState(0);
   const [decryptedFolders, setDecryptedFolders] = useState<VaultFolder[]>([]);
   const [decryptedCiphers, setDecryptedCiphers] = useState<Cipher[]>([]);
+  const [decryptedOrganizations, setDecryptedOrganizations] = useState<OrgProfile[]>([]);
+  // User's decrypted RSA private key (PKCS#8, base64). Lets dialogs unwrap
+  // type-4 organization member keys for sharing and management.
+  const [userPrivateKeyB64, setUserPrivateKeyB64] = useState<string | undefined>(undefined);
+  const [decryptedCollections, setDecryptedCollections] = useState<OrgCollection[]>([]);
   const [decryptedSends, setDecryptedSends] = useState<Send[]>([]);
   const [demoUsers, setDemoUsers] = useState<AdminUser[]>(() => DEMO_ADMIN_USERS.map((user) => ({ ...user })));
   const [demoInvites, setDemoInvites] = useState<AdminInvite[]>(() => DEMO_ADMIN_INVITES.map((invite) => ({ ...invite })));
@@ -915,6 +932,8 @@ export default function App() {
     setProfile((prev) => stripProfileSecrets(prev));
     setDecryptedFolders([]);
     setDecryptedCiphers([]);
+      setDecryptedOrganizations([]);
+      setDecryptedCollections([]);
     setDecryptedSends([]);
     clearPasswordSecurityCache();
     setUnlockPassword('');
@@ -1015,6 +1034,18 @@ export default function App() {
     };
   }, [phase, lockTimeoutMinutes, sessionTimeoutAction]);
 
+  useEffect(() => {
+    const open = () => setOrgDialogOpen(true);
+    const openShare = (e: Event) => setShareCipherTarget(((e as CustomEvent).detail?.cipher) || null);
+    const openManage = (e: Event) => setManageOrgId(((e as CustomEvent).detail?.organizationId) || null);
+    const openShareLogin = (e: Event) => setShareLoginTarget(((e as CustomEvent).detail?.cipher) || null);
+    window.addEventListener('nodewarden:new-organization', open);
+    window.addEventListener('nodewarden:share-cipher', openShare as EventListener);
+    window.addEventListener('nodewarden:manage-organization', openManage as EventListener);
+    window.addEventListener('nodewarden:share-login-send', openShareLogin as EventListener);
+    return () => { window.removeEventListener('nodewarden:new-organization', open); window.removeEventListener('nodewarden:share-cipher', openShare as EventListener); window.removeEventListener('nodewarden:manage-organization', openManage as EventListener); window.removeEventListener('nodewarden:share-login-send', openShareLogin as EventListener); };
+  }, []);
+
   function renderPassiveOverlays() {
     return (
       <AppGlobalOverlays
@@ -1049,6 +1080,8 @@ export default function App() {
     if (phase !== 'app') {
       setDecryptedFolders([]);
       setDecryptedCiphers([]);
+      setDecryptedOrganizations([]);
+      setDecryptedCollections([]);
       setDecryptedSends([]);
       setDemoUsers(DEMO_ADMIN_USERS.map((user) => ({ ...user })));
       setDemoInvites(DEMO_ADMIN_INVITES.map((invite) => ({ ...invite })));
@@ -1327,6 +1360,8 @@ export default function App() {
     if (!session?.symEncKey || !session?.symMacKey) {
       setDecryptedFolders([]);
       setDecryptedCiphers([]);
+      setDecryptedOrganizations([]);
+      setDecryptedCollections([]);
       setDecryptedSends([]);
       setVaultInitialDecryptDone(false);
       setVaultDecryptError('');
@@ -1339,6 +1374,26 @@ export default function App() {
     (async () => {
       try {
         setVaultDecryptError('');
+        // Decrypt the user's RSA private key so type-4 organization member
+        // keys (official Bitwarden shape) can be unwrapped for org/collection
+        // and org-owned cipher decryption.
+        let userPrivateKeyB64: string | undefined;
+        const encryptedUserPrivateKey = (profile?.privateKey
+          || (profile?.accountKeys as { publicKeyEncryptionKeyPair?: { wrappedPrivateKey?: string } } | undefined)
+              ?.publicKeyEncryptionKeyPair?.wrappedPrivateKey) || '';
+        if (encryptedUserPrivateKey) {
+          try {
+            const pk = await decryptUserPrivateKey(
+              encryptedUserPrivateKey,
+              base64ToBytes(session.symEncKey!),
+              base64ToBytes(session.symMacKey!)
+            );
+            userPrivateKeyB64 = bytesToBase64ForOrg(pk);
+          } catch {
+            // Private key unavailable; org/collection names may stay encrypted.
+          }
+        }
+        if (active) setUserPrivateKeyB64(userPrivateKeyB64);
         let result;
         try {
           result = await decryptVaultCoreInWorker({
@@ -1346,6 +1401,8 @@ export default function App() {
             ciphers: encryptedCiphers,
             symEncKeyB64: session.symEncKey!,
             symMacKeyB64: session.symMacKey!,
+            organizations: (encryptedVaultCore?.organizations) || [],
+            userPrivateKeyB64,
           });
         } catch {
           result = await decryptVaultCore({
@@ -1353,12 +1410,32 @@ export default function App() {
             ciphers: encryptedCiphers,
             symEncKeyB64: session.symEncKey!,
             symMacKeyB64: session.symMacKey!,
+            organizations: (encryptedVaultCore?.organizations) || [],
+            userPrivateKeyB64,
           });
         }
 
         if (!active) return;
         setDecryptedFolders(result.folders);
         setDecryptedCiphers(result.ciphers);
+        try {
+          const orgResult = await decryptOrganizations({
+            organizations: (encryptedVaultCore?.organizations) || [],
+            collections: (encryptedVaultCore?.collections) || [],
+            symEncKeyB64: session.symEncKey!,
+            symMacKeyB64: session.symMacKey!,
+            userPrivateKeyB64,
+          });
+          if (active) {
+            setDecryptedOrganizations(orgResult.organizations);
+            setDecryptedCollections(orgResult.collections);
+          }
+        } catch {
+          if (active) {
+            setDecryptedOrganizations((encryptedVaultCore?.organizations) || []);
+            setDecryptedCollections((encryptedVaultCore?.collections) || []);
+          }
+        }
         setVaultInitialDecryptDone(true);
         if (!session.accessToken) return;
         const repairKey = `${session.accessToken}:${encryptedCiphers.map((cipher) => `${cipher.id}:${cipher.revisionDate || ''}`).join(',')}`;
@@ -1393,7 +1470,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [session?.symEncKey, session?.symMacKey, vaultCacheKey, encryptedFolders, encryptedCiphers]);
+  }, [session?.symEncKey, session?.symMacKey, vaultCacheKey, encryptedFolders, encryptedCiphers, encryptedVaultCore?.organizations, encryptedVaultCore?.collections, profile?.privateKey, profile?.accountKeys]);
 
   useEffect(() => {
     if (IS_DEMO_MODE) return;
@@ -1469,6 +1546,8 @@ export default function App() {
       ciphers: Array.isArray(snapshot?.ciphers) ? snapshot.ciphers : [],
       folders: Array.isArray(snapshot?.folders) ? snapshot.folders : [],
       sends: Array.isArray(snapshot?.sends) ? snapshot.sends : [],
+      organizations: Array.isArray(snapshot?.organizations) ? snapshot.organizations : [],
+      collections: Array.isArray(snapshot?.collections) ? snapshot.collections : [],
     };
   }
 
@@ -1593,6 +1672,7 @@ export default function App() {
         ciphers: [encrypted],
         symEncKeyB64: session.symEncKey,
         symMacKeyB64: session.symMacKey,
+        organizations: (encryptedVaultCore?.organizations) || [],
       });
       const decrypted = result.ciphers[0];
       if (decrypted) setDecryptedCiphers((current) => upsertById(current, decrypted));
@@ -2032,6 +2112,8 @@ export default function App() {
     settingsAccountRoute: SETTINGS_ACCOUNT_ROUTE,
     decryptedCiphers,
     decryptedFolders,
+    decryptedOrganizations,
+    decryptedCollections,
     decryptedSends,
     vaultError: vaultCoreQuery.isError && !encryptedVaultCore ? t('txt_load_vault_failed') : vaultDecryptError,
     ciphersLoading: !(vaultCoreQuery.isError && !encryptedVaultCore) && !vaultDecryptError && !vaultInitialDecryptDone,
@@ -2414,6 +2496,44 @@ export default function App() {
           setDisableTotpPassword('');
         }}
         disableTotpSubmitting={disableTotpSubmitting}
+      />
+      <OrganizationManagePage
+        organizationId={manageOrgId}
+        organizations={decryptedOrganizations}
+        collections={decryptedCollections}
+        session={session}
+        userPrivateKeyB64={userPrivateKeyB64}
+        authedFetch={authedFetch}
+        onClose={() => setManageOrgId(null)}
+        onChanged={() => { void (async () => { await invalidateVaultCoreSyncSnapshot(vaultCacheKey); await refetchVaultCoreData(); })(); }}
+      />
+      <ShareCipherDialog
+        open={!!shareCipherTarget}
+        cipher={shareCipherTarget}
+        organizations={decryptedOrganizations}
+        collections={decryptedCollections}
+        session={session}
+        userPrivateKeyB64={userPrivateKeyB64}
+        authedFetch={authedFetch}
+        onClose={() => setShareCipherTarget(null)}
+        onShared={() => { pushToast('success', t('txt_shared') || 'Shared'); void (async () => { await invalidateVaultCoreSyncSnapshot(vaultCacheKey); await refetchVaultCoreData(); })(); }}
+      />
+      <ShareLoginDialog
+        open={!!shareLoginTarget}
+        cipher={shareLoginTarget}
+        session={session}
+        authedFetch={authedFetch}
+        onClose={() => setShareLoginTarget(null)}
+      />
+      <OrganizationCreateDialog
+        open={orgDialogOpen}
+        session={session}
+        authedFetch={authedFetch}
+        onClose={() => setOrgDialogOpen(false)}
+        onCreated={(summary) => {
+          pushToast('success', t('txt_organization_created') || ('Organization created: ' + summary.name));
+          void (async () => { await invalidateVaultCoreSyncSnapshot(vaultCacheKey); await refetchVaultCoreData(); })();
+        }}
       />
       <AuthRequestApprovalDialog
         open={authRequestDialogOpen}

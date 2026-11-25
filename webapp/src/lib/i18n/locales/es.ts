@@ -612,6 +612,29 @@ const es: Record<string, string> = {
   "txt_favorite": "Favorito",
   "txt_favorites": "Favoritos",
   "txt_duplicates": "Duplicados",
+  "txt_new_organization": "New organization",
+  "txt_organizations": "Organizations",
+  "txt_manage_organization": "Manage organization",
+  "txt_members": "Members",
+  "txt_invite": "Invite",
+  "txt_invited": "Invited",
+  "txt_accepted": "Accepted",
+  "txt_confirmed": "Confirmed",
+  "txt_share_to_organization": "Share to organization",
+  "txt_share": "Share",
+  "txt_shared": "Shared",
+  "txt_collections": "Collections",
+  "txt_no_collections": "No collections",
+  "txt_select_organization": "Select an organization",
+  "txt_select_collection": "Select a collection",
+  "txt_organization_name": "Organization name",
+  "txt_organization_name_required": "Organization name is required",
+  "txt_new_organization_subtitle": "Create a shared space to organize and share logins.",
+  "txt_organization_name_placeholder": "e.g. Family, Team",
+  "txt_collection_name_placeholder": "Default collection",
+  "txt_collection_name_help": "Shared items are stored in collections. Leave blank to use the default name.",
+  "txt_collection_name": "First collection name",
+  "txt_organization_created": "Organization created",
   "txt_duplicate_detection_mode": "Coincidir por",
   "txt_duplicate_mode_exact": "Elemento exacto",
   "txt_duplicate_mode_login_site": "Sitio + usuario + contraseña",
@@ -1454,7 +1477,9 @@ const es: Record<string, string> = {
   "txt_auth_request_update_failed": "No se pudo actualizar la solicitud de inicio de sesión con dispositivo",
   "txt_auth_request_approved": "Inicio de sesión con dispositivo aprobado",
   "txt_auth_request_denied": "Inicio de sesión con dispositivo denegado",
-  "txt_auth_request_missing_public_key": "La solicitud de inicio de sesión con dispositivo no incluye una clave pública"
+  "txt_auth_request_missing_public_key": "La solicitud de inicio de sesión con dispositivo no incluye una clave pública",
+  "txt_create_subfolder": "Crear subcarpeta",
+  "txt_nested_folder_help": "Use / para anidar carpetas, p. ej. Trabajo/Correo. Cree primero la carpeta principal. Cambiar el nombre de una carpeta no cambia el de sus subcarpetas.",
 };
 
 Object.assign(es, {
@@ -1464,5 +1489,49 @@ Object.assign(es, {
 Object.assign(es, { "txt_password_security_last_checked": "Última comprobación: {value}" });
 Object.assign(es, { "txt_no_password_risks_in_filter": "No hay riesgos de contraseña en esta categoría" });
 Object.assign(es, { "txt_password_security_show_all": "Show all", "txt_password_security_hide_all": "Hide all", "txt_password_security_jump": "Go to item", "txt_password_security_exposed_short": "Exposed {count} times", "txt_password_security_weak_short": "Weak password", "txt_password_security_reused_short": "Reused" });
+
+Object.assign(es, {
+  "txt_access_password_optional": "Contraseña de acceso (opcional)",
+  "txt_collection_hint": "Las colecciones agrupan elementos compartidos. Los miembros ven los elementos de sus colecciones.",
+  "txt_collection_name_short": "Nombre de la colección",
+  "txt_expiration_days": "Caduca después de (días)",
+  "txt_generate_link": "Generar enlace",
+  "txt_include_live_2fa": "Incluir código 2FA en vivo",
+  "txt_invite_member_hint": "Invita a un miembro por correo y confírmalo cuando acepte.",
+  "txt_member_email_placeholder": "member@example.com",
+  "txt_no_members": "Aún no hay miembros.",
+  "txt_share_as_link": "Compartir como enlace",
+  "txt_share_link_ready": "Enlace listo. Cualquiera con este enlace puede verlo hasta que caduque.",
+  "txt_share_link_totp_note": "El enlace muestra un código 2FA que se actualiza automáticamente.",
+  "txt_share_login_hint": "Crea un enlace. Cualquiera que lo tenga podrá ver la contraseña y, si se incluye, un código 2FA en vivo.",
+  "txt_shared_login": "Inicio de sesión compartido",
+  "txt_done": "Listo",
+});
+
+Object.assign(es, {
+  "txt_accepted": "Aceptado",
+  "txt_collection_name": "Nombre de la primera colección",
+  "txt_collection_name_help": "Los elementos compartidos se guardan en colecciones. Déjalo en blanco para usar el nombre predeterminado.",
+  "txt_collection_name_placeholder": "Colección predeterminada",
+  "txt_collections": "Colecciones",
+  "txt_confirmed": "Confirmado",
+  "txt_invite": "Invitar",
+  "txt_invited": "Invitado",
+  "txt_manage_organization": "Gestionar organización",
+  "txt_members": "Miembros",
+  "txt_new_organization": "Nueva organización",
+  "txt_new_organization_subtitle": "Crea un espacio compartido para organizar y compartir inicios de sesión.",
+  "txt_no_collections": "Sin colecciones",
+  "txt_organization_created": "Organización creada",
+  "txt_organization_name": "Nombre de la organización",
+  "txt_organization_name_placeholder": "p. ej. Familia, Equipo",
+  "txt_organization_name_required": "El nombre de la organización es obligatorio",
+  "txt_organizations": "Organizaciones",
+  "txt_select_collection": "Selecciona una colección",
+  "txt_select_organization": "Selecciona una organización",
+  "txt_share": "Compartir",
+  "txt_share_to_organization": "Compartir con la organización",
+  "txt_shared": "Compartido",
+});
 
 export default es;

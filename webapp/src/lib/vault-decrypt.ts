@@ -1,12 +1,20 @@
-import { base64ToBytes, decryptBw, decryptStr } from './crypto';
+import { base64ToBytes, decryptBw, decryptStr, rsaDecryptOaepSha1 } from './crypto';
 import { deriveSendKeyParts, looksLikeCipherString } from './app-support';
-import type { Cipher, Folder, Send } from './types';
+import type { Cipher, Folder, Send, OrgProfile, OrgCollection } from './types';
+import { decryptSingleCipher } from './decrypt-cipher';
 
 export interface DecryptVaultCoreArgs {
   folders: Folder[];
   ciphers: Cipher[];
   symEncKeyB64: string;
   symMacKeyB64: string;
+  // Organizations the user belongs to. Needed to unwrap per-cipher keys of
+  // org-owned ciphers, whose `key` is wrapped with the organization key rather
+  // than the user key.
+  organizations?: OrgProfile[];
+  // The user's decrypted RSA private key (PKCS#8, base64). Required to unwrap
+  // type-4 organization member keys. Optional for personal-only vaults.
+  userPrivateKeyB64?: string;
 }
 
 export interface DecryptVaultCoreResult {
@@ -19,14 +27,6 @@ export interface DecryptSendsArgs {
   symEncKeyB64: string;
   symMacKeyB64: string;
   origin: string;
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.byteLength !== b.byteLength) return false;
-  for (let i = 0; i < a.byteLength; i += 1) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
 }
 
 async function decryptField(
@@ -42,83 +42,46 @@ async function decryptField(
   }
 }
 
-async function decryptCipherField(
-  value: string | null | undefined,
-  itemEnc: Uint8Array,
-  itemMac: Uint8Array,
+// Unwraps an organization member key into its 64-byte symmetric org key.
+// Official Bitwarden wraps it with the user's RSA public key (type 4); older
+// NodeWarden builds used the user symmetric key (type 2). Both are supported.
+export async function unwrapOrgKey(
+  memberKey: string,
   userEnc: Uint8Array,
   userMac: Uint8Array,
-  canFallbackToUserKey: boolean
-): Promise<string> {
-  if (!value || typeof value !== 'string') return '';
-  try {
-    return await decryptStr(value, itemEnc, itemMac);
-  } catch {
-    // Try the legacy user-key path for mixed key/field ciphers.
-  }
-  if (canFallbackToUserKey) {
-    try {
-      return await decryptStr(value, userEnc, userMac);
-    } catch {
-      // Preserve the old raw fallback for fields that are genuinely unreadable.
-    }
-  }
-  return looksLikeCipherString(value) ? '' : value;
+  userPrivateKey: Uint8Array | null
+): Promise<{ enc: Uint8Array; mac: Uint8Array } | null> {
+  const raw = memberKey.startsWith('4.')
+    ? (userPrivateKey ? await rsaDecryptOaepSha1(userPrivateKey, memberKey) : null)
+    : await decryptBw(memberKey, userEnc, userMac);
+  if (!raw || raw.byteLength < 64) return null;
+  return { enc: raw.slice(0, 32), mac: raw.slice(32, 64) };
 }
 
-async function decryptCipherObjectFields<T extends Record<string, unknown>>(
-  source: T | null | undefined,
-  fields: readonly string[],
-  itemEnc: Uint8Array,
-  itemMac: Uint8Array,
+async function buildOrgKeyMap(
+  organizations: OrgProfile[] | undefined,
   userEnc: Uint8Array,
   userMac: Uint8Array,
-  canFallbackToUserKey: boolean
-): Promise<T | null | undefined> {
-  if (!source || typeof source !== 'object') return source;
-  const next: Record<string, unknown> = { ...source };
-  for (const field of fields) {
-    const decKey = `dec${field.charAt(0).toUpperCase()}${field.slice(1)}`;
-    next[decKey] = await decryptCipherField(
-      source[field] as string | null | undefined,
-      itemEnc,
-      itemMac,
-      userEnc,
-      userMac,
-      canFallbackToUserKey
-    );
-  }
-  return next as T;
-}
-
-async function decryptFieldWithSource(
-  value: string | null | undefined,
-  itemEnc: Uint8Array,
-  itemMac: Uint8Array,
-  userEnc: Uint8Array,
-  userMac: Uint8Array,
-  canFallbackToUserKey: boolean
-): Promise<{ text: string; source: 'item' | 'user' | 'plain' }> {
-  const raw = String(value || '').trim();
-  if (!raw) return { text: '', source: 'plain' };
-  try {
-    return { text: await decryptStr(raw, itemEnc, itemMac), source: 'item' };
-  } catch {
-    // Try legacy user-key fallback below.
-  }
-  if (canFallbackToUserKey) {
+  userPrivateKeyB64: string | undefined
+): Promise<Map<string, { enc: Uint8Array; mac: Uint8Array }>> {
+  const userPrivateKey = userPrivateKeyB64 ? base64ToBytes(userPrivateKeyB64) : null;
+  const orgKeys = new Map<string, { enc: Uint8Array; mac: Uint8Array }>();
+  for (const org of organizations || []) {
+    if (!org?.id || !org.key) continue;
     try {
-      return { text: await decryptStr(raw, userEnc, userMac), source: 'user' };
+      const key = await unwrapOrgKey(org.key, userEnc, userMac, userPrivateKey);
+      if (key) orgKeys.set(org.id, key);
     } catch {
-      // Keep plain fallback.
+      // Org key not decryptable (e.g. membership not yet confirmed).
     }
   }
-  return { text: looksLikeCipherString(raw) ? '' : raw, source: 'plain' };
+  return orgKeys;
 }
 
 export async function decryptVaultCore(args: DecryptVaultCoreArgs): Promise<DecryptVaultCoreResult> {
   const userEnc = base64ToBytes(args.symEncKeyB64);
   const userMac = base64ToBytes(args.symMacKeyB64);
+  const orgKeys = await buildOrgKeyMap(args.organizations, userEnc, userMac, args.userPrivateKeyB64);
 
   const folders = await Promise.all(
     args.folders.map(async (folder) => ({
@@ -127,172 +90,10 @@ export async function decryptVaultCore(args: DecryptVaultCoreArgs): Promise<Decr
     }))
   );
 
-  const ciphers = await Promise.all(
-    args.ciphers.map(async (cipher) => {
-      let itemEnc = userEnc;
-      let itemMac = userMac;
-      let usesItemKey = false;
-      if (cipher.key) {
-        try {
-          const itemKey = await decryptBw(cipher.key, userEnc, userMac);
-          if (itemKey.length >= 64) {
-            itemEnc = itemKey.slice(0, 32);
-            itemMac = itemKey.slice(32, 64);
-            usesItemKey = true;
-          }
-        } catch {
-          // Keep user key fallback.
-        }
-      }
-
-      const itemUsesUserKey = sameBytes(itemEnc, userEnc) && sameBytes(itemMac, userMac);
-      const canFallbackToUserKey = usesItemKey;
-      const nextCipher: Cipher = {
-        ...cipher,
-        decName: await decryptCipherField(cipher.name || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-        decNotes: await decryptCipherField(cipher.notes || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-      };
-
-      if (cipher.login) {
-        nextCipher.login = {
-          ...cipher.login,
-          decUsername: await decryptCipherField(cipher.login.username || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decPassword: await decryptCipherField(cipher.login.password || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decTotp: await decryptCipherField(cipher.login.totp || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          uris: await Promise.all(
-            (cipher.login.uris || []).map(async (uri) => ({
-              ...uri,
-              decUri: await decryptCipherField(uri.uri || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-            }))
-          ),
-        };
-      }
-
-      if (Array.isArray(cipher.passwordHistory)) {
-        nextCipher.passwordHistory = await Promise.all(
-          cipher.passwordHistory.map(async (entry) => ({
-            ...entry,
-            decPassword: await decryptCipherField(entry?.password || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          }))
-        );
-      }
-
-      if (cipher.card) {
-        nextCipher.card = {
-          ...cipher.card,
-          decCardholderName: await decryptCipherField(cipher.card.cardholderName || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decNumber: await decryptCipherField(cipher.card.number || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decBrand: await decryptCipherField(cipher.card.brand || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decExpMonth: await decryptCipherField(cipher.card.expMonth || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decExpYear: await decryptCipherField(cipher.card.expYear || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decCode: await decryptCipherField(cipher.card.code || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-        };
-      }
-
-      if (cipher.identity) {
-        nextCipher.identity = {
-          ...cipher.identity,
-          decTitle: await decryptCipherField(cipher.identity.title || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decFirstName: await decryptCipherField(cipher.identity.firstName || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decMiddleName: await decryptCipherField(cipher.identity.middleName || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decLastName: await decryptCipherField(cipher.identity.lastName || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decUsername: await decryptCipherField(cipher.identity.username || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decCompany: await decryptCipherField(cipher.identity.company || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decSsn: await decryptCipherField(cipher.identity.ssn || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decPassportNumber: await decryptCipherField(cipher.identity.passportNumber || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decLicenseNumber: await decryptCipherField(cipher.identity.licenseNumber || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decEmail: await decryptCipherField(cipher.identity.email || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decPhone: await decryptCipherField(cipher.identity.phone || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decAddress1: await decryptCipherField(cipher.identity.address1 || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decAddress2: await decryptCipherField(cipher.identity.address2 || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decAddress3: await decryptCipherField(cipher.identity.address3 || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decCity: await decryptCipherField(cipher.identity.city || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decState: await decryptCipherField(cipher.identity.state || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decPostalCode: await decryptCipherField(cipher.identity.postalCode || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decCountry: await decryptCipherField(cipher.identity.country || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-        };
-      }
-
-      if (cipher.sshKey) {
-        const encryptedFingerprint = cipher.sshKey.keyFingerprint || cipher.sshKey.fingerprint || '';
-        nextCipher.sshKey = {
-          ...cipher.sshKey,
-          decPrivateKey: await decryptCipherField(cipher.sshKey.privateKey || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          decPublicKey: await decryptCipherField(cipher.sshKey.publicKey || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          keyFingerprint: encryptedFingerprint || null,
-          fingerprint: encryptedFingerprint || null,
-          decFingerprint: await decryptCipherField(encryptedFingerprint, itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-        };
-      }
-
-      if (cipher.bankAccount) {
-        nextCipher.bankAccount = await decryptCipherObjectFields(
-          cipher.bankAccount,
-          ['bankName', 'nameOnAccount', 'accountType', 'accountNumber', 'routingNumber', 'branchNumber', 'pin', 'swiftCode', 'iban', 'bankContactPhone'],
-          itemEnc,
-          itemMac,
-          userEnc,
-          userMac,
-          canFallbackToUserKey
-        );
-      }
-
-      if (cipher.driversLicense) {
-        nextCipher.driversLicense = await decryptCipherObjectFields(
-          cipher.driversLicense,
-          ['firstName', 'middleName', 'lastName', 'dateOfBirth', 'licenseNumber', 'issuingCountry', 'issuingState', 'issueDate', 'expirationDate', 'issuingAuthority', 'licenseClass'],
-          itemEnc,
-          itemMac,
-          userEnc,
-          userMac,
-          canFallbackToUserKey
-        );
-      }
-
-      if (cipher.passport) {
-        nextCipher.passport = await decryptCipherObjectFields(
-          cipher.passport,
-          ['surname', 'givenName', 'dateOfBirth', 'sex', 'birthPlace', 'nationality', 'issuingCountry', 'passportNumber', 'passportType', 'nationalIdentificationNumber', 'issuingAuthority', 'issueDate', 'expirationDate'],
-          itemEnc,
-          itemMac,
-          userEnc,
-          userMac,
-          canFallbackToUserKey
-        );
-      }
-
-      if (cipher.fields) {
-        nextCipher.fields = await Promise.all(
-          cipher.fields.map(async (field) => ({
-            ...field,
-            decName: await decryptCipherField(field.name || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-            decValue: await decryptCipherField(field.value || '', itemEnc, itemMac, userEnc, userMac, canFallbackToUserKey),
-          }))
-        );
-      }
-
-      if (Array.isArray(cipher.attachments)) {
-        nextCipher.attachments = await Promise.all(
-          cipher.attachments.map(async (attachment) => {
-            const fileNameResult = await decryptFieldWithSource(
-              attachment.fileName || '',
-              itemEnc,
-              itemMac,
-              userEnc,
-              userMac,
-              !itemUsesUserKey
-            );
-            return {
-              ...attachment,
-              decFileName: fileNameResult.text,
-            };
-          })
-        );
-      }
-
-      return nextCipher;
-    })
-  );
+  const ciphers = await Promise.all(args.ciphers.map((cipher) => {
+    const orgId = typeof cipher.organizationId === 'string' ? cipher.organizationId : '';
+    return decryptSingleCipher(cipher, userEnc, userMac, orgId ? orgKeys.get(orgId) : undefined);
+  }));
 
   return { folders, ciphers };
 }
@@ -333,4 +134,30 @@ export async function decryptSends(args: DecryptSendsArgs): Promise<Send[]> {
       return nextSend;
     })
   );
+}
+
+export async function decryptOrganizations(args: {
+  organizations: OrgProfile[];
+  collections: OrgCollection[];
+  symEncKeyB64: string;
+  symMacKeyB64: string;
+  userPrivateKeyB64?: string;
+}): Promise<{ organizations: OrgProfile[]; collections: OrgCollection[] }> {
+  const userEnc = base64ToBytes(args.symEncKeyB64);
+  const userMac = base64ToBytes(args.symMacKeyB64);
+  const orgKeys = await buildOrgKeyMap(args.organizations, userEnc, userMac, args.userPrivateKeyB64);
+  const collections: OrgCollection[] = [];
+  for (const col of args.collections || []) {
+    const key = orgKeys.get(col.organizationId);
+    let decName = col.name;
+    if (key) {
+      try {
+        decName = await decryptStr(col.name, key.enc, key.mac);
+      } catch {
+        decName = col.name;
+      }
+    }
+    collections.push({ ...col, decName });
+  }
+  return { organizations: args.organizations || [], collections };
 }

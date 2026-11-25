@@ -612,6 +612,29 @@ const fi: Record<string, string> = {
   "txt_favorite": "Suosikki",
   "txt_favorites": "Suosikit",
   "txt_duplicates": "Kaksoiskappaleet",
+  "txt_new_organization": "New organization",
+  "txt_organizations": "Organizations",
+  "txt_manage_organization": "Manage organization",
+  "txt_members": "Members",
+  "txt_invite": "Invite",
+  "txt_invited": "Invited",
+  "txt_accepted": "Accepted",
+  "txt_confirmed": "Confirmed",
+  "txt_share_to_organization": "Share to organization",
+  "txt_share": "Share",
+  "txt_shared": "Shared",
+  "txt_collections": "Collections",
+  "txt_no_collections": "No collections",
+  "txt_select_organization": "Select an organization",
+  "txt_select_collection": "Select a collection",
+  "txt_organization_name": "Organization name",
+  "txt_organization_name_required": "Organization name is required",
+  "txt_new_organization_subtitle": "Create a shared space to organize and share logins.",
+  "txt_organization_name_placeholder": "e.g. Family, Team",
+  "txt_collection_name_placeholder": "Default collection",
+  "txt_collection_name_help": "Shared items are stored in collections. Leave blank to use the default name.",
+  "txt_collection_name": "First collection name",
+  "txt_organization_created": "Organization created",
   "txt_duplicate_detection_mode": "Vertailuperuste",
   "txt_duplicate_mode_exact": "Tarkalleen sama nimike",
   "txt_duplicate_mode_login_site": "Sivusto + käyttäjätunnus + salasana",
@@ -1454,7 +1477,9 @@ const fi: Record<string, string> = {
   "txt_auth_request_approved": "Laitteen kirjautuminen hyväksytty",
   "txt_auth_request_denied": "Laitteen kirjautuminen hylätty",
   "txt_auth_request_missing_public_key": "Laitekirjautumispyynnöstä puuttuu julkinen avain",
-  "txt_ip_address": "IP-osoite"
+  "txt_ip_address": "IP-osoite",
+  "txt_create_subfolder": "Luo alikansio",
+  "txt_nested_folder_help": "Luo sisäkkäisiä kansioita merkillä /, esim. Työ/Sähköposti. Luo ensin yläkansio. Kansion nimeäminen uudelleen ei nimeä sen alikansioita uudelleen.",
 };
 
 Object.assign(fi, {
@@ -1464,5 +1489,49 @@ Object.assign(fi, {
 Object.assign(fi, { "txt_password_security_last_checked": "Tarkistettu viimeksi: {value}" });
 Object.assign(fi, { "txt_no_password_risks_in_filter": "Tässä luokassa ei ole salasanojen riskejä" });
 Object.assign(fi, { "txt_password_security_show_all": "Show all", "txt_password_security_hide_all": "Hide all", "txt_password_security_jump": "Go to item", "txt_password_security_exposed_short": "Exposed {count} times", "txt_password_security_weak_short": "Weak password", "txt_password_security_reused_short": "Reused" });
+
+Object.assign(fi, {
+  "txt_access_password_optional": "Käyttöoikeussalasana (valinnainen)",
+  "txt_collection_hint": "Kokoelmat ryhmittelevät jaettuja kohteita. Jäsenet näkevät kokoelmiensa kohteet.",
+  "txt_collection_name_short": "Kokoelman nimi",
+  "txt_expiration_days": "Vanhenee (päivää)",
+  "txt_generate_link": "Luo linkki",
+  "txt_include_live_2fa": "Sisällytä reaaliaikainen 2FA-koodi",
+  "txt_invite_member_hint": "Kutsu jäsen sähköpostilla ja vahvista hänet, kun hän hyväksyy kutsun.",
+  "txt_member_email_placeholder": "member@example.com",
+  "txt_no_members": "Jäseniä ei vielä ole.",
+  "txt_share_as_link": "Jaa linkkinä",
+  "txt_share_link_ready": "Linkki on valmis. Kuka tahansa linkin saanut voi katsoa sitä, kunnes se vanhenee.",
+  "txt_share_link_totp_note": "Linkki näyttää 2FA-koodin, joka päivittyy automaattisesti.",
+  "txt_share_login_hint": "Luo linkki. Kuka tahansa linkin saanut voi nähdä salasanan ja, jos se sisällytetään, reaaliaikaisen 2FA-koodin.",
+  "txt_shared_login": "Jaettu kirjautuminen",
+  "txt_done": "Valmis",
+});
+
+Object.assign(fi, {
+  "txt_accepted": "Hyväksytty",
+  "txt_collection_name": "Ensimmäisen kokoelman nimi",
+  "txt_collection_name_help": "Jaetut kohteet tallennetaan kokoelmiin. Jätä tyhjäksi käyttääksesi oletusnimeä.",
+  "txt_collection_name_placeholder": "Oletuskokoelma",
+  "txt_collections": "Kokoelmat",
+  "txt_confirmed": "Vahvistettu",
+  "txt_invite": "Kutsu",
+  "txt_invited": "Kutsuttu",
+  "txt_manage_organization": "Hallitse organisaatiota",
+  "txt_members": "Jäsenet",
+  "txt_new_organization": "Uusi organisaatio",
+  "txt_new_organization_subtitle": "Luo jaettu tila kirjautumisten järjestämiseen ja jakamiseen.",
+  "txt_no_collections": "Ei kokoelmia",
+  "txt_organization_created": "Organisaatio luotu",
+  "txt_organization_name": "Organisaation nimi",
+  "txt_organization_name_placeholder": "esim. Perhe, Tiimi",
+  "txt_organization_name_required": "Organisaation nimi vaaditaan",
+  "txt_organizations": "Organisaatiot",
+  "txt_select_collection": "Valitse kokoelma",
+  "txt_select_organization": "Valitse organisaatio",
+  "txt_share": "Jaa",
+  "txt_share_to_organization": "Jaa organisaatiolle",
+  "txt_shared": "Jaettu",
+});
 
 export default fi;

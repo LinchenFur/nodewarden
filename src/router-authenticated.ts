@@ -6,6 +6,7 @@ import {
   handleGetKeys,
   handleSetKeys,
   handleGetRevisionDate,
+  handleSetUserKeyId,
   handleVerifyPassword,
   handleChangePassword,
   handleSetVerifyDevices,
@@ -30,6 +31,7 @@ import {
   handleGetCipher,
   handleCreateCipher,
   handleUpdateCipher,
+  handleShareCipher,
   handleDeleteCipher,
   handleDeleteCipherCompat,
   handlePermanentDeleteCipher,
@@ -76,6 +78,7 @@ import {
 } from './handlers/attachments';
 import { handleAuthenticatedDeviceRoute } from './router-devices';
 import { handleAdminRoute } from './router-admin';
+import { handleOrganizationRoute } from './router-organizations';
 import { handleGetDomains, handleUpdateDomains } from './handlers/domains';
 import {
   handleCreateAccountPasskeyCredential,
@@ -241,6 +244,10 @@ export async function handleAuthenticatedRoute(
     return handleGetRevisionDate(request, env, userId);
   }
 
+  if (path === '/api/accounts/key-management/user-key-id' && method === 'POST') {
+    return handleSetUserKeyId(request, env, userId);
+  }
+
   if (path === '/api/accounts/verify-password' && method === 'POST') {
     return handleVerifyPassword(request, env, userId);
   }
@@ -339,7 +346,7 @@ export async function handleAuthenticatedRoute(
     if (subPath === '/archive' && (method === 'PUT' || method === 'POST')) return handleArchiveCipher(request, env, userId, cipherId);
     if (subPath === '/unarchive' && (method === 'PUT' || method === 'POST')) return handleUnarchiveCipher(request, env, userId, cipherId);
     if (subPath === '/partial' && (method === 'PUT' || method === 'POST')) return handlePartialUpdateCipher(request, env, userId, cipherId);
-    if (subPath === '/share' && method === 'POST') return handleGetCipher(request, env, userId, cipherId);
+    if (subPath === '/share' && (method === 'POST' || method === 'PUT')) return handleShareCipher(request, env, userId, cipherId);
     if (subPath === '/details' && method === 'GET') return handleGetCipher(request, env, userId, cipherId);
     if (subPath === '/attachment/v2' && method === 'POST') return handleCreateAttachment(request, env, userId, cipherId);
     if (subPath === '/attachment' && method === 'POST') return handleCreateAttachment(request, env, userId, cipherId);
@@ -403,19 +410,7 @@ export async function handleAuthenticatedRoute(
     return errorResponse('Method not allowed', 405);
   }
 
-  if (path === '/api/collections' || path.startsWith('/api/collections/')) {
-    if (method === 'GET') {
-      return jsonResponse({ data: [], object: 'list', continuationToken: null });
-    }
-    return null;
-  }
 
-  if (path === '/api/organizations' || path.startsWith('/api/organizations/')) {
-    if (method === 'GET') {
-      return jsonResponse({ data: [], object: 'list', continuationToken: null });
-    }
-    return null;
-  }
 
   if (path === '/api/sends') {
     if (method === 'GET') return handleGetSends(request, env, userId);
@@ -473,6 +468,9 @@ export async function handleAuthenticatedRoute(
 
   const authenticatedDeviceResponse = await handleAuthenticatedDeviceRoute(request, env, userId, path, method);
   if (authenticatedDeviceResponse) return authenticatedDeviceResponse;
+
+  const organizationResponse = await handleOrganizationRoute(request, env, userId, currentUser, path, method);
+  if (organizationResponse) return organizationResponse;
 
   const adminResponse = await handleAdminRoute(request, env, currentUser, path, method);
   if (adminResponse) return adminResponse;

@@ -244,6 +244,40 @@ export async function decryptBw(cipherString: string, encKey: Uint8Array, macKey
   return decryptAesCbc(parsed.ct, encKey, parsed.iv);
 }
 
+// Decrypts a Bitwarden type-4 ("4.<b64>") RSA-OAEP(SHA-1) EncString using a
+// PKCS#8 private key. Used to unwrap organization member keys, which official
+// Bitwarden wraps with the user's RSA public key.
+export async function rsaDecryptOaepSha1(
+  privateKeyPkcs8: Uint8Array,
+  type4CipherString: string
+): Promise<Uint8Array> {
+  const dot = type4CipherString.indexOf('.');
+  if (dot <= 0) throw new Error('invalid encrypted string');
+  const type = Number(type4CipherString.slice(0, dot));
+  if (type !== 4) throw new Error('not an RSA EncString');
+  const body = type4CipherString.slice(dot + 1).split('|')[0];
+  const ct = base64ToBytes(body);
+  const subtle = requireWebCrypto().subtle;
+  const key = await subtle.importKey(
+    'pkcs8',
+    toBufferSource(privateKeyPkcs8),
+    { name: 'RSA-OAEP', hash: 'SHA-1' },
+    false,
+    ['decrypt']
+  );
+  const plain = await subtle.decrypt({ name: 'RSA-OAEP' }, key, toBufferSource(ct));
+  return new Uint8Array(plain);
+}
+
+// Decrypts the user's RSA private key (a type-2 EncString wrapped with the user
+// key) and returns raw PKCS#8 bytes, ready for rsaDecryptOaepSha1.
+export async function decryptUserPrivateKey(
+  encryptedPrivateKey: string,
+  userEnc: Uint8Array,
+  userMac: Uint8Array
+): Promise<Uint8Array> {
+  return decryptBw(encryptedPrivateKey, userEnc, userMac);
+}
 export async function decryptStr(cipherString: string | null | undefined, encKey: Uint8Array, macKey?: Uint8Array): Promise<string> {
   if (!cipherString || typeof cipherString !== 'string') return '';
   const plain = await decryptBw(cipherString, encKey, macKey);

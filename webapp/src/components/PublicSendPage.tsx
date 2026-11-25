@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Clipboard, Download, Eye, Lock } from 'lucide-preact';
 import { accessPublicSend, accessPublicSendFile, decryptPublicSend, decryptPublicSendFileBytes } from '@/lib/api/send';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { toBufferSource } from '@/lib/crypto';
+import { toBufferSource, calcTotpNow } from '@/lib/crypto';
 import { downloadBytesAsFile, readResponseBytesWithProgress } from '@/lib/download';
 import NotFoundPage from '@/components/NotFoundPage';
 import StandalonePageFrame from '@/components/StandalonePageFrame';
@@ -28,6 +28,35 @@ interface PublicSendData {
   decFileName?: string | null;
   expirationDate?: string | null;
   file?: PublicSendFileData | null;
+}
+
+// Structured payload nodewarden writes when sharing a vault login as a Send, so
+// the recipient can see the password and a live-refreshing 2FA code. Plain text
+// Sends have no such marker and keep rendering as before.
+interface SharedLogin {
+  username: string;
+  password: string;
+  totp: string;
+  note: string;
+  uri: string;
+}
+
+function parseSharedLogin(decText: string | null | undefined): SharedLogin | null {
+  const raw = String(decText || '').trim();
+  if (!raw.startsWith('{') || !raw.includes('"nwShare"')) return null;
+  try {
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    if (Number(obj.nwShare) !== 1) return null;
+    return {
+      username: typeof obj.username === 'string' ? obj.username : '',
+      password: typeof obj.password === 'string' ? obj.password : '',
+      totp: typeof obj.totp === 'string' ? obj.totp : '',
+      note: typeof obj.note === 'string' ? obj.note : '',
+      uri: typeof obj.uri === 'string' ? obj.uri : '',
+    };
+  } catch {
+    return null;
+  }
 }
 
 function decodeBase64Url(value: string): Uint8Array | null {
@@ -62,6 +91,77 @@ function formatSendDate(value: string | null | undefined): string {
 
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
+}
+
+// Renders a 2FA code that recomputes locally every second from the shared TOTP
+// secret, so the recipient always sees the current code without an account.
+function LiveTotp(props: { secret: string }) {
+  const [state, setState] = useState<{ code: string; remain: number; period: number } | null>(null);
+  // Tracks the previous remaining seconds so we can suppress the ring's
+  // animation on the frame where the countdown resets to a new period,
+  // otherwise it would visibly spring backwards from empty to full.
+  const prevRemainRef = useRef<number | null>(null);
+  // Always holds the latest code so the copy button copies the current value
+  // regardless of render timing.
+  const codeRef = useRef<string>('');
+  useEffect(() => {
+    let active = true;
+    let timer: number | undefined;
+    const tick = async () => {
+      const r = await calcTotpNow(props.secret);
+      if (!active) return;
+      codeRef.current = r ? r.code : '';
+      setState(r);
+      timer = window.setTimeout(() => void tick(), 1000);
+    };
+    void tick();
+    return () => { active = false; if (timer) window.clearTimeout(timer); };
+  }, [props.secret]);
+  if (!state) return <strong className="public-send-totp-code">------</strong>;
+  const grouped = state.code.length === 6 ? `${state.code.slice(0, 3)} ${state.code.slice(3)}` : state.code;
+
+  // Countdown ring: a full circle that empties as `remain` shrinks. The ring
+  // and the centered number turn red in the last 10 seconds.
+  const period = state.period || 30;
+  const R = 13;
+  const CIRCUMFERENCE = 2 * Math.PI * R;
+  const fraction = Math.max(0, Math.min(1, state.remain / period));
+  const dashOffset = CIRCUMFERENCE * (1 - fraction);
+  const low = state.remain <= 10;
+  const resetting = prevRemainRef.current != null && state.remain > prevRemainRef.current;
+  prevRemainRef.current = state.remain;
+
+  return (
+    <span className="public-send-totp">
+      <strong className={`public-send-totp-code${low ? ' is-low' : ''}`}>{grouped}</strong>
+      <button
+        type="button"
+        className="btn btn-secondary small public-send-totp-copy"
+        aria-label={t('txt_copy') || 'Copy'}
+        onClick={() => void copyTextToClipboard(codeRef.current || state.code)}
+      >
+        <Clipboard size={14} className="btn-icon" />{t('txt_copy') || 'Copy'}
+      </button>
+      <span className={`public-send-totp-ring${low ? ' is-low' : ''}`}>
+        <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true">
+          <circle className="public-send-totp-ring-track" cx="16" cy="16" r={R} fill="none" strokeWidth="3" />
+          <circle
+            className={`public-send-totp-ring-progress${resetting ? ' no-transition' : ''}`}
+            cx="16"
+            cy="16"
+            r={R}
+            fill="none"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={CIRCUMFERENCE}
+            strokeDashoffset={dashOffset}
+            transform="rotate(-90 16 16)"
+          />
+        </svg>
+        <span className="public-send-totp-ring-num">{state.remain}</span>
+      </span>
+    </span>
+  );
 }
 
 function parsePublicSendData(value: unknown): PublicSendData | null {
@@ -263,7 +363,49 @@ export default function PublicSendPage(props: PublicSendPageProps) {
 
         {!loading && sendData && (
           <>
-            {sendData.type === 0 ? (
+            {sendData.type === 0 && parseSharedLogin(sendData.decText) ? (
+              (() => {
+                const login = parseSharedLogin(sendData.decText)!;
+                return (
+                  <div className="card public-send-card">
+                    <div className="public-send-card-head">
+                      <span>{t('txt_shared_login') || 'Shared login'}</span>
+                    </div>
+                    {login.uri ? (
+                      <div className="kv-line public-send-login-row">
+                        <span>{t('txt_website') || 'Website'}</span>
+                        <strong className="public-send-login-value">{login.uri}</strong>
+                      </div>
+                    ) : null}
+                    {login.username ? (
+                      <div className="kv-line public-send-login-row">
+                        <span>{t('txt_username') || 'Username'}</span>
+                        <strong className="public-send-login-value">{login.username}</strong>
+                        <button type="button" className="btn btn-secondary small" onClick={() => void copyTextToClipboard(login.username)}>
+                          <Clipboard size={14} className="btn-icon" />{t('txt_copy')}
+                        </button>
+                      </div>
+                    ) : null}
+                    {login.password ? (
+                      <div className="kv-line public-send-login-row">
+                        <span>{t('txt_password') || 'Password'}</span>
+                        <strong className="public-send-login-value public-send-password">{login.password}</strong>
+                        <button type="button" className="btn btn-secondary small" onClick={() => void copyTextToClipboard(login.password)}>
+                          <Clipboard size={14} className="btn-icon" />{t('txt_copy')}
+                        </button>
+                      </div>
+                    ) : null}
+                    {login.totp ? (
+                      <div className="kv-line public-send-login-row">
+                        <span>{t('txt_verification_code') || 'Verification code'}</span>
+                        <LiveTotp secret={login.totp} />
+                      </div>
+                    ) : null}
+                    {login.note ? <div className="notes" style={{ marginTop: '10px' }}>{login.note}</div> : null}
+                  </div>
+                );
+              })()
+            ) : sendData.type === 0 ? (
               <div className="card public-send-card">
                 <div className="public-send-card-head">
                   <span>{t('txt_text_send')}</span>

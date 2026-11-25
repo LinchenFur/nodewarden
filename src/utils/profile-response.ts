@@ -2,9 +2,20 @@ import type { Env, ProfileResponse, User } from '../types';
 import { buildAccountKeys } from './user-decryption';
 import { isYubiKeyEnabled } from './yubico-otp';
 
-export function buildProfileResponse(user: User, env?: Env): ProfileResponse {
+export interface ProfileResponseOptions {
+  /** The user has at least one WebAuthn credential registered as a two-factor provider. */
+  hasTwoFactorPasskey?: boolean;
+}
+
+export function buildProfileResponse(
+  user: User,
+  env?: Env,
+  organizationsOrOptions: any[] | ProfileResponseOptions = [],
+  options: ProfileResponseOptions = {}
+): ProfileResponse {
   void env;
-  const organizations: any[] = [];
+  const organizations = Array.isArray(organizationsOrOptions) ? organizationsOrOptions : [];
+  const profileOptions = Array.isArray(organizationsOrOptions) ? options : organizationsOrOptions;
   const accountKeys = buildAccountKeys(user);
 
   return {
@@ -17,7 +28,7 @@ export function buildProfileResponse(user: User, env?: Env): ProfileResponse {
     usesKeyConnector: false,
     masterPasswordHint: user.masterPasswordHint,
     culture: 'en-US',
-    twoFactorEnabled: !!user.totpSecret || isYubiKeyEnabled(user),
+    twoFactorEnabled: !!user.totpSecret || isYubiKeyEnabled(user) || profileOptions.hasTwoFactorPasskey === true,
     yubikeyEnabled: isYubiKeyEnabled(user),
     key: user.key,
     privateKey: user.privateKey,

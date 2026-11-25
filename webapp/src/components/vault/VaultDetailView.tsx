@@ -1,6 +1,6 @@
 import { createPortal } from 'preact/compat';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { AlertTriangle, Archive, Clipboard, Download, Eye, EyeOff, ExternalLink, Folder, Paperclip, Pencil, RefreshCw, RotateCcw, ShieldCheck, ShieldAlert, Trash2, X } from 'lucide-preact';
+import { AlertTriangle, Archive, Clipboard, Download, Eye, EyeOff, ExternalLink, Folder, Link2, Paperclip, Pencil, RefreshCw, RotateCcw, Share2, ShieldCheck, ShieldAlert, Trash2, X } from 'lucide-preact';
 import { useDialogLifecycle } from '@/components/ConfirmDialog';
 import type { TotpCodeResult } from '@/lib/crypto';
 import { checkPasswordLeaked, type PasswordBreachResult } from '@/lib/password-security';
@@ -559,6 +559,16 @@ export default function VaultDetailView(props: VaultDetailViewProps) {
                   <button type="button" className="btn btn-secondary" onClick={props.onStartEdit}>
                     <Pencil size={14} className="btn-icon" /> {t('txt_edit')}
                   </button>
+                  {!(props.selectedCipher as any).organizationId && !isDeleted ? (
+                    <button type="button" className="btn btn-secondary" onClick={() => window.dispatchEvent(new CustomEvent('nodewarden:share-cipher', { detail: { cipher: props.selectedCipher } }))}>
+                      <Share2 size={14} className="btn-icon" /> {t('txt_share_to_organization') || 'Share'}
+                    </button>
+                  ) : null}
+                  {Number(props.selectedCipher.type) === 1 && !isDeleted ? (
+                    <button type="button" className="btn btn-secondary" onClick={() => window.dispatchEvent(new CustomEvent('nodewarden:share-login-send', { detail: { cipher: props.selectedCipher } }))}>
+                      <Link2 size={14} className="btn-icon" /> {t('txt_share_as_link') || 'Share as link'}
+                    </button>
+                  ) : null}
                   {isArchived ? (
                     <button type="button" className="btn btn-secondary" onClick={() => void props.onUnarchive(props.selectedCipher)}>
                       <RotateCcw size={14} className="btn-icon" /> {t('txt_unarchive')}

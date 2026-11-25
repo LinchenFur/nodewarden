@@ -241,6 +241,8 @@ export interface Cipher {
   id: string;
   type: number;
   folderId?: string | null;
+  organizationId?: string | null;
+  collectionIds?: string[] | null;
   favorite?: boolean;
   reprompt?: number;
   name?: string | null;
@@ -263,6 +265,7 @@ export interface Cipher {
   fields?: CipherField[] | null;
   decName?: string;
   decNotes?: string;
+  unresolved?: boolean;
 }
 
 export interface SendTextData {
@@ -312,6 +315,7 @@ export interface SendDraft {
   password: string;
   hasPassword?: boolean;
   disabled: boolean;
+  hideEmail?: boolean;
 }
 
 export type CustomFieldType = 0 | 1 | 2 | 3;
@@ -616,4 +620,33 @@ export interface DomainRules {
   customEquivalentDomains: CustomEquivalentDomain[];
   globalEquivalentDomains: GlobalEquivalentDomain[];
   object: 'domains';
+}
+
+// --- Organizations / Collections (client-side) ---
+export interface OrgProfile {
+  id: string;
+  name: string;
+  billingEmail: string | null;
+  // The organization symmetric key wrapped with the user key (EncString).
+  key: string | null;
+  // 0 invited, 1 accepted, 2 confirmed.
+  status: number;
+  // 0 owner, 1 admin, 2 user.
+  type: number;
+  organizationUserId?: string;
+  object?: string;
+}
+
+export interface OrgCollection {
+  id: string;
+  organizationId: string;
+  // Encrypted (EncString) collection name as stored server-side.
+  name: string;
+  externalId: string | null;
+  readOnly?: boolean;
+  hidePasswords?: boolean;
+  manage?: boolean;
+  object?: string;
+  // Decrypted display name, filled client-side after sync.
+  decName?: string;
 }

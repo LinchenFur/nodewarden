@@ -11,6 +11,7 @@ import { findMatchingTotpCounter, isTotpEnabled } from '../utils/totp';
 import { createRecoveryCode, recoveryCodeEquals } from '../utils/recovery-code';
 import { buildAccountKeys } from '../utils/user-decryption';
 import { buildProfileResponse } from '../utils/profile-response';
+import { buildProfileOrganizations } from './organizations';
 import { isYubiKeyEnabled, isYubiKeyPublicId, requestYubicoApiCredentials, verifyYubicoOtp, yubiKeyPublicIdFromOtp } from '../utils/yubico-otp';
 import {
   getYubicoCredentials,
@@ -494,7 +495,9 @@ export async function handleGetProfile(request: Request, env: Env, userId: strin
   const storage = new StorageService(env.DB);
   const user = await storage.getUserById(userId);
   if (!user) return errorResponse('User not found', 404);
-  return jsonResponse(buildProfileResponse(user, env));
+  const organizations = await buildProfileOrganizations(storage, user.id);
+  const hasTwoFactorPasskey = await storage.countAccountPasskeyCredentialsByUserId(user.id, 'twoFactor') > 0;
+  return jsonResponse(buildProfileResponse(user, env, organizations, { hasTwoFactorPasskey }));
 }
 
 // PUT /api/accounts/profile
@@ -533,7 +536,9 @@ export async function handleUpdateProfile(request: Request, env: Env, userId: st
     },
   });
 
-  return jsonResponse(buildProfileResponse(user, env));
+  const organizations = await buildProfileOrganizations(storage, user.id);
+  const hasTwoFactorPasskey = await storage.countAccountPasskeyCredentialsByUserId(user.id, 'twoFactor') > 0;
+  return jsonResponse(buildProfileResponse(user, env, organizations, { hasTwoFactorPasskey }));
 }
 
 // PUT/POST /api/accounts/verify-devices
@@ -1502,6 +1507,46 @@ export async function handleGetRevisionDate(request: Request, env: Env, userId: 
   // Return as milliseconds timestamp (Bitwarden format)
   const timestamp = new Date(revisionDate).getTime();
   return jsonResponse(timestamp);
+}
+
+// POST /api/accounts/key-management/user-key-id
+// Bitwarden clients (bw CLI >= 2026.9) record the id of the current user key once
+// after login and fail the login when this endpoint is missing. The id is
+// client-reported metadata; it cannot decrypt anything.
+export async function handleSetUserKeyId(request: Request, env: Env, userId: string): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    return errorResponse('Request body must be a JSON object', 400);
+  }
+  const payload = body as Record<string, unknown>;
+  const userKeyId = payload.userKeyId ?? payload.UserKeyId;
+  if (typeof userKeyId !== 'string' || !/^[0-9a-f]{32}$/.test(userKeyId)) {
+    return errorResponse('userKeyId must be a 32-character lowercase hex string', 400);
+  }
+
+  const storage = new StorageService(env.DB);
+  const user = await storage.getUserById(userId);
+  if (!user) return errorResponse('User not found', 404);
+  if (user.userKeyId === userKeyId) return new Response(null, { status: 200 });
+  if (user.userKeyId) {
+    return errorResponse('User key id is already set.', 400);
+  }
+  if (!(await storage.setUserKeyId(userId, userKeyId))) {
+    // Another client may have recorded the same id after our initial read.
+    const currentUser = await storage.getUserById(userId);
+    if (!currentUser) return errorResponse('User not found', 404);
+    if (currentUser.userKeyId === userKeyId) return new Response(null, { status: 200 });
+    return errorResponse('User key id is already set.', 400);
+  }
+
+  // /api/sync is cached per revision date; bump it so the next sync carries the id.
+  await storage.updateRevisionDate(userId);
+  return new Response(null, { status: 200 });
 }
 
 // POST /api/accounts/verify-password

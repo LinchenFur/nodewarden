@@ -60,6 +60,8 @@ export interface User {
   yubikeyKey5: string | null;
   yubikeyNfc: boolean;
   apiKey: string | null;
+  // Client-reported id of the current user key (32 lowercase hex chars); metadata only.
+  userKeyId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -658,6 +660,7 @@ export interface SyncResponse {
       WrappedUserKey1: string;
       WrappedUserKey2: string;
     } | null;
+    UserKeyId?: string | null;
     Object?: string;
   } | null;
   // PascalCase for desktop/browser clients
@@ -677,4 +680,55 @@ export interface SyncResponse {
     } | null;
   } | null;
   object: string;
+}
+
+// --- Organizations / Collections (MVP) ---
+export type OrgRole = 'owner' | 'admin' | 'user';
+// 0 = invited, 1 = accepted, 2 = confirmed
+export type OrgMembershipStatus = 0 | 1 | 2;
+
+export interface Organization {
+  id: string;
+  name: string;
+  billingEmail: string | null;
+  publicKey: string;
+  privateKey: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrgMembership {
+  id: string;
+  organizationId: string;
+  userId: string;
+  role: OrgRole;
+  status: OrgMembershipStatus;
+  key: string | null;
+  accessAll: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Joined view used when building invite/member listings.
+export interface OrgMembershipWithUser extends OrgMembership {
+  email: string;
+  name: string | null;
+  publicKey: string | null;
+}
+
+export interface Collection {
+  id: string;
+  organizationId: string;
+  name: string;
+  externalId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CollectionAccess {
+  collectionId: string;
+  membershipId: string;
+  readOnly: boolean;
+  hidePasswords: boolean;
+  manage: boolean;
 }
