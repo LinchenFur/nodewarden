@@ -1607,3 +1607,105 @@ export async function bulkMoveCiphers(
     if (!resp.ok) throw new Error('Bulk move failed');
   }
 }
+
+// Recursively walks a cipher payload and re-wraps every encrypted-string value
+// (EncString, e.g. "2.iv|data|mac") from one key pair to another. Decrypted
+// helper fields (decName, decNotes, ...) are dropped: they are plaintext and
+// must never be sent to the server. Used when sharing a personal item so that
+// all field ciphertexts become valid under the new per-cipher key.
+async function reencryptEncStrings(
+  value: unknown,
+  fromEnc: Uint8Array,
+  fromMac: Uint8Array,
+  toEnc: Uint8Array,
+  toMac: Uint8Array
+): Promise<unknown> {
+  if (typeof value === 'string') {
+    if (!looksLikeCipherString(value)) return value;
+    try {
+      const raw = await decryptBw(value, fromEnc, fromMac);
+      return await encryptBw(raw, toEnc, toMac);
+    } catch {
+      // Not decryptable with the source key (already under another key, or a
+      // non-field string that merely resembles an EncString): leave untouched.
+      return value;
+    }
+  }
+  if (Array.isArray(value)) {
+    const out: unknown[] = [];
+    for (const item of value) {
+      out.push(await reencryptEncStrings(item, fromEnc, fromMac, toEnc, toMac));
+    }
+    return out;
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      // Drop decrypted plaintext helpers so they never reach the server.
+      if (/^dec[A-Z]/.test(key)) continue;
+      out[key] = await reencryptEncStrings(item, fromEnc, fromMac, toEnc, toMac);
+    }
+    return out;
+  }
+  return value;
+}
+
+// Shares a personal cipher into an organization collection.
+//
+// nodewarden stores personal items without a per-cipher key: every field is
+// encrypted directly with the user key. Sharing requires the item to be
+// readable by organization members, so we mint a fresh per-cipher key, wrap it
+// with the organization key, and re-encrypt every field ciphertext from the
+// user key to the new cipher key. Items that already carry a per-cipher key are
+// simply re-wrapped (unwrap with user key, wrap with org key) without touching
+// the field ciphertexts.
+export async function shareCipherToOrganization(
+  authedFetch: AuthedFetch,
+  session: SessionState,
+  cipher: Cipher,
+  organizationId: string,
+  orgKeyB64: { enc: string; mac: string },
+  collectionIds: string[]
+): Promise<void> {
+  if (!session.symEncKey || !session.symMacKey) throw new Error("Vault key unavailable");
+  if (!collectionIds.length) throw new Error("Select at least one collection");
+  const userEnc = base64ToBytes(session.symEncKey);
+  const userMac = base64ToBytes(session.symMacKey);
+  const orgEnc = base64ToBytes(orgKeyB64.enc);
+  const orgMac = base64ToBytes(orgKeyB64.mac);
+
+  let shared: Record<string, unknown>;
+
+  if (cipher.key) {
+    // Item already has a per-cipher key: fields stay encrypted under it, so we
+    // only re-wrap the key itself from the user key to the organization key.
+    const raw = await decryptBw(cipher.key, userEnc, userMac);
+    if (raw.length < 64) throw new Error("Unexpected cipher key length");
+    const newKey = await encryptBw(raw, orgEnc, orgMac);
+    shared = { ...cipher, organizationId, key: newKey, collectionIds };
+  } else {
+    // No per-cipher key: mint a 64-byte item key, wrap it with the org key, and
+    // re-encrypt every field ciphertext from the user key to the item key.
+    const itemKeyRaw = crypto.getRandomValues(new Uint8Array(64));
+    const itemEnc = itemKeyRaw.slice(0, 32);
+    const itemMac = itemKeyRaw.slice(32, 64);
+    const wrappedKey = await encryptBw(itemKeyRaw, orgEnc, orgMac);
+
+    const reencrypted = (await reencryptEncStrings(
+      { ...cipher },
+      userEnc,
+      userMac,
+      itemEnc,
+      itemMac
+    )) as Record<string, unknown>;
+
+    shared = { ...reencrypted, organizationId, key: wrappedKey, collectionIds };
+  }
+
+  const resp = await authedFetch("/api/ciphers/" + encodeURIComponent(cipher.id) + "/share", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cipher: shared, collectionIds }),
+  });
+  if (!resp.ok) throw new Error(await parseErrorMessage(resp, "Share failed"));
+}

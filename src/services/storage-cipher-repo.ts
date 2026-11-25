@@ -21,6 +21,7 @@ interface CipherRow {
   data: string;
   reprompt: number | null;
   key: string | null;
+  organization_id?: string | null;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -57,6 +58,17 @@ const CIPHER_SCALAR_DATA_KEYS = new Set([
   'deletedAt',
   'deleted_at',
   'deletedDate',
+  // Organization ownership is server-controlled and lives in the
+  // ciphers.organization_id column (set only by the share flow). Never persist a
+  // client-supplied copy in the data blob, or ownership could be spoofed.
+  'organizationId',
+  'OrganizationId',
+  'organization_id',
+  // Collection membership is stored in the cipher_collections table and is
+  // server-controlled. Keeping a client copy in the blob lets the response
+  // echo collection links that were never actually persisted.
+  'collectionIds',
+  'CollectionIds',
 ]);
 
 function buildCipherData(cipher: Cipher, folderId: string | null): string {
@@ -86,6 +98,8 @@ function parseCipherRow(row: CipherRow | null | undefined): Cipher | null {
       favorite: row.favorite != null ? !!row.favorite : !!parsed.favorite,
       reprompt: row.reprompt ?? parsed.reprompt ?? 0,
       key: row.key ?? parsed.key ?? null,
+      // Column is the single source of truth for organization ownership.
+      organizationId: row.organization_id ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       archivedAt: row.archived_at ?? parsed.archivedAt ?? parsed.archivedDate ?? null,
@@ -98,7 +112,7 @@ function parseCipherRow(row: CipherRow | null | undefined): Cipher | null {
 }
 
 function selectCipherColumns(): string {
-  return 'id, user_id, type, folder_id, name, notes, favorite, data, reprompt, key, created_at, updated_at, archived_at, deleted_at';
+  return 'id, user_id, organization_id, type, folder_id, name, notes, favorite, data, reprompt, key, created_at, updated_at, archived_at, deleted_at';
 }
 
 export async function getCipher(db: D1Database, id: string): Promise<Cipher | null> {
@@ -312,6 +326,36 @@ export async function getCiphersByIds(
     const placeholders = chunk.map(() => '?').join(',');
     const stmt = db.prepare(`SELECT ${selectCipherColumns()} FROM ciphers WHERE user_id = ? AND id IN (${placeholders})`);
     const res = await stmt.bind(userId, ...chunk).all<CipherRow>();
+    out.push(
+      ...(res.results || []).flatMap((row) => {
+        const cipher = parseCipherRow(row);
+        return cipher ? [cipher] : [];
+      })
+    );
+  }
+  return out;
+}
+
+// Loads ciphers by id regardless of owner. Used to deliver organization ciphers
+// (owned by the member who shared them) to other confirmed members during sync.
+// Callers MUST restrict `ids` to ciphers the requesting user is authorized to
+// read (e.g. via accessible organization collections).
+export async function getCiphersByIdsAnyOwner(
+  db: D1Database,
+  sqlChunkSize: SqlChunkSize,
+  ids: string[]
+): Promise<Cipher[]> {
+  if (ids.length === 0) return [];
+  const uniqueIds = sanitizeIds(ids);
+  if (!uniqueIds.length) return [];
+
+  const chunkSize = sqlChunkSize(0);
+  const out: Cipher[] = [];
+  for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+    const chunk = uniqueIds.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(',');
+    const stmt = db.prepare(`SELECT ${selectCipherColumns()} FROM ciphers WHERE id IN (${placeholders})`);
+    const res = await stmt.bind(...chunk).all<CipherRow>();
     out.push(
       ...(res.results || []).flatMap((row) => {
         const cipher = parseCipherRow(row);

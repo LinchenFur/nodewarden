@@ -62,13 +62,14 @@ export async function decryptSingleCipher(
   cipher: Cipher,
   userEnc: Uint8Array,
   userMac: Uint8Array,
+  wrapKey?: { enc: Uint8Array; mac: Uint8Array },
 ): Promise<Cipher> {
   let itemEnc = userEnc;
   let itemMac = userMac;
   let usesItemKey = false;
   if (cipher.key) {
     try {
-      const itemKey = await decryptBw(cipher.key, userEnc, userMac);
+      const itemKey = await decryptBw(cipher.key, wrapKey?.enc ?? userEnc, wrapKey?.mac ?? userMac);
       if (itemKey.length >= 64) {
         itemEnc = itemKey.slice(0, 32);
         itemMac = itemKey.slice(32, 64);

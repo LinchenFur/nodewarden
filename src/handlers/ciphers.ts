@@ -28,6 +28,14 @@ import { parsePagination, encodeContinuationToken } from '../utils/pagination';
 import { readActingDeviceIdentifier } from '../utils/device';
 import { auditRequestMetadata, writeAuditEvent } from '../services/audit-events';
 import { readNullableFullUpdateField } from './cipher-full-update';
+import { isStaleCipherUpdate } from './cipher-revision';
+import {
+  isValidEncString,
+  normalizeFido2CredentialsForCompatibility,
+  normalizeFido2CredentialsForStorage,
+  optionalEncString,
+  validateFido2EncryptedFields,
+} from './cipher-encrypted-fields';
 
 // CONTRACT:
 // Cipher JSON is the highest-risk Bitwarden compatibility surface. Preserve
@@ -164,18 +172,6 @@ function readCipherArchivedAt(source: any, fallback: string | null = null): stri
   return archived.present ? normalizeCipherTimestamp(archived.value) : fallback;
 }
 
-function isStaleCipherUpdate(existingUpdatedAt: string, clientRevisionDate: unknown): boolean {
-  const normalizedRevisionDate = normalizeCipherTimestamp(clientRevisionDate);
-  if (!normalizedRevisionDate) return false;
-  const existingTs = Date.parse(existingUpdatedAt);
-  const clientTs = Date.parse(normalizedRevisionDate);
-  // The Bitwarden SDK sends whole seconds. An explicit fractional part, including .000, keeps its precision.
-  const wholeSeconds = typeof clientRevisionDate === 'string'
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/i.test(clientRevisionDate);
-  if (wholeSeconds) return Math.floor(existingTs / 1000) * 1000 > clientTs;
-  return existingTs > clientTs;
-}
-
 function syncCipherComputedAliases(cipher: Cipher): Cipher {
   cipher.archivedDate = cipher.archivedAt ?? null;
   cipher.deletedDate = cipher.deletedAt ?? null;
@@ -201,30 +197,6 @@ async function writeCipherAudit(
       ...auditRequestMetadata(request),
     },
   });
-}
-
-function isValidEncString(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const trimmed = value.trim();
-  const dot = trimmed.indexOf('.');
-  if (dot <= 0) return false;
-  const type = Number(trimmed.slice(0, dot));
-  if (!Number.isInteger(type) || type < 0) return false;
-  const parts = trimmed.slice(dot + 1).split('|');
-  if (parts.some((part) => part.length === 0)) return false;
-
-  // Bitwarden's legacy symmetric EncString variants require IV + data,
-  // while the authenticated AES-CBC-HMAC variant requires IV + data + MAC.
-  if (type === 0 || type === 1 || type === 4) return parts.length >= 2;
-  if (type === 2) return parts.length === 3;
-
-  // Keep newer one-part formats, such as COSE Encrypt0, future-compatible.
-  return parts.length >= 1;
-}
-
-function optionalEncString(value: unknown): string | null {
-  if (value == null || value === '') return null;
-  return isValidEncString(value) ? value.trim() : null;
 }
 
 function optionalEncStringWithin(value: unknown, maxLength: number): string | null {
@@ -311,11 +283,58 @@ function normalizeCipherForStorage(cipher: Cipher): Cipher {
   return syncCipherComputedAliases(cipher);
 }
 
+// Bitwarden's JSON shape is camelCase, but some third-party clients send the
+// PascalCase aliases inside `login` (rbw writes Username/Password/Totp/Uris).
+// Storing those next to the camelCase fields makes the sync payload carry the
+// same logical field twice, and strict clients reject the whole response
+// (duplicate field `Uris`), which locks them out of the vault permanently.
+// Canonicalize to camelCase, preferring the camelCase value when a client sends
+// both, and apply it on the response path too so rows written before this fix
+// stop breaking sync.
+const CIPHER_LOGIN_KEY_ALIASES: Record<string, string> = {
+  Username: 'username',
+  Password: 'password',
+  Totp: 'totp',
+  Uri: 'uri',
+  Uris: 'uris',
+};
+
+const CIPHER_LOGIN_URI_KEY_ALIASES: Record<string, string> = {
+  Uri: 'uri',
+  UriChecksum: 'uriChecksum',
+  Match: 'match',
+};
+
+function canonicalizeAliasedKeys(source: Record<string, any>, aliases: Record<string, string>): Record<string, any> {
+  const next: Record<string, any> = {};
+  for (const [key, value] of Object.entries(source)) {
+    const canonical = aliases[key] ?? key;
+    // A client that sends both spellings keeps its camelCase value.
+    if (canonical !== key && Object.prototype.hasOwnProperty.call(source, canonical)) continue;
+    next[canonical] = value;
+  }
+  return next;
+}
+
+function canonicalizeCipherLoginKeys(login: any): any {
+  if (!login || typeof login !== 'object' || Array.isArray(login)) return login ?? null;
+  const next = canonicalizeAliasedKeys(login, CIPHER_LOGIN_KEY_ALIASES);
+  if (Array.isArray(next.uris)) {
+    next.uris = next.uris.map((entry: any) => (
+      entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? canonicalizeAliasedKeys(entry, CIPHER_LOGIN_URI_KEY_ALIASES)
+        : entry
+    ));
+  }
+  return next;
+}
+
 export function normalizeCipherLoginForStorage(login: any): any {
-  if (!login || typeof login !== 'object') return login ?? null;
+  const canonical = canonicalizeCipherLoginKeys(login);
+  if (!canonical || typeof canonical !== 'object') return canonical ?? null;
   return {
-    ...login,
-    fido2Credentials: Array.isArray(login.fido2Credentials) ? login.fido2Credentials : null,
+    ...canonical,
+    fido2Credentials: normalizeFido2CredentialsForStorage(canonical.fido2Credentials),
   };
 }
 
@@ -401,16 +420,8 @@ export function validateCipherEncryptedFieldsForCompatibility(cipher: Cipher): s
       }
     }
 
-    // Validate FIDO2 credentials — all encrypted-string fields, both required and optional, must be valid.
-    if (Array.isArray(login.fido2Credentials)) {
-      const fido2EncryptedKeys = ['credentialId', 'keyType', 'keyAlgorithm', 'keyCurve', 'keyValue', 'rpId', 'counter', 'discoverable', 'userHandle', 'userName', 'rpName', 'userDisplayName'];
-      for (const cred of login.fido2Credentials) {
-        if (!cred || typeof cred !== 'object') continue;
-        for (const key of fido2EncryptedKeys) {
-          if (cred[key] != null && !isValidEncString(cred[key])) return `FIDO2 credential ${key} must be an encrypted string.`;
-        }
-      }
-    }
+    const fido2Error = validateFido2EncryptedFields(login.fido2Credentials);
+    if (fido2Error) return fido2Error;
   }
 
   // Validate SSH key fields — all three must be encrypted strings.
@@ -445,44 +456,6 @@ export function validateCipherEncryptedFieldsForCompatibility(cipher: Cipher): s
   }
 
   return null;
-}
-
-function normalizeFido2CredentialsForCompatibility(credentials: any): any[] | null {
-  if (!Array.isArray(credentials) || credentials.length === 0) return null;
-  const requiredEncryptedKeys = [
-    'credentialId',
-    'keyType',
-    'keyAlgorithm',
-    'keyCurve',
-    'keyValue',
-    'rpId',
-    'counter',
-    'discoverable',
-  ];
-  const optionalEncryptedKeys = ['userHandle', 'userName', 'rpName', 'userDisplayName'];
-  const out: any[] = [];
-
-  for (const credential of credentials) {
-    if (!credential || typeof credential !== 'object') continue;
-    const next: Record<string, any> = { ...credential };
-    let valid = true;
-    for (const key of requiredEncryptedKeys) {
-      if (!isValidEncString(next[key])) {
-        valid = false;
-        break;
-      }
-      next[key] = String(next[key]).trim();
-    }
-    if (!valid) continue;
-    for (const key of optionalEncryptedKeys) {
-      if (Object.prototype.hasOwnProperty.call(next, key)) {
-        next[key] = optionalEncString(next[key]);
-      }
-    }
-    out.push(next);
-  }
-
-  return out.length ? out : null;
 }
 
 // Android 2026.2.0 requires sshKey.keyFingerprint in sync payloads.
@@ -978,6 +951,10 @@ export async function handleCreateCipher(request: Request, env: Env, userId: str
     archivedAt: readCipherArchivedAt(cipherData, null),
     deletedAt: null,
   };
+  // New items are always personal. Organization ownership is assigned only by
+  // the share endpoint, so do not echo client-supplied organization metadata.
+  (cipher as any).organizationId = null;
+  (cipher as any).collectionIds = [];
   cipher.folderId = createFolderId.present ? normalizeOptionalId(createFolderId.value) : normalizeOptionalId(cipher.folderId);
   cipher.key = normalizeCipherKeyForStorage(createKey.present ? createKey.value : cipher.key);
   cipher.login = createLogin.present ? (createLogin.value ?? null) : (cipher.login ?? null);
@@ -1080,6 +1057,9 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
     archivedAt: readCipherArchivedAt(cipherData, existingCipher.archivedAt ?? null),
     deletedAt: existingCipher.deletedAt,
   };
+  // Organization ownership/collections are server-controlled; keep stored values.
+  (cipher as any).organizationId = (existingCipher as any).organizationId ?? null;
+  (cipher as any).collectionIds = await storage.getCipherCollectionIds(existingCipher.id);
   if (incomingKey.present) {
     const normalizedIncomingKey = normalizeCipherKeyForStorage(incomingKey.value);
     cipher.key = normalizedIncomingKey || normalizeCipherKeyForStorage(existingCipher.key);
@@ -1515,4 +1495,117 @@ export async function handleBulkPermanentDeleteCiphers(request: Request, env: En
   }
 
   return new Response(null, { status: 204 });
+}
+
+// POST/PUT /api/ciphers/:id/share
+// Moves a personal cipher into an organization. The client re-wraps the cipher
+// key with the organization key and posts the updated cipher plus target
+// collection ids. The server stores the new blob, marks organization ownership,
+// and links the cipher to the collections.
+export async function handleShareCipher(
+  request: Request,
+  env: Env,
+  userId: string,
+  id: string
+): Promise<Response> {
+  const storage = new StorageService(env.DB);
+
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON', 400);
+  }
+
+  const cipherData = body.Cipher || body.cipher || {};
+  const collectionIds: string[] = (body.collectionIds || body.CollectionIds || body.collectionId || [])
+    .map((c: unknown) => String(c || '').trim())
+    .filter(Boolean);
+
+  const organizationId = String(
+    cipherData.organizationId || cipherData.OrganizationId || body.organizationId || ''
+  ).trim();
+
+  if (!organizationId) return errorResponse('organizationId is required', 400);
+  if (!collectionIds.length) return errorResponse('At least one collection is required', 400);
+
+  // The acting user must be a confirmed member of the target organization.
+  const membership = await storage.getMembershipForUser(organizationId, userId);
+  if (!membership || membership.status !== 2) return errorResponse('Forbidden', 403);
+
+  // Verify every target collection belongs to the organization.
+  const orgCollections = await storage.listCollectionsForOrg(organizationId);
+  const validCollectionIds = new Set(orgCollections.map((c) => c.id));
+  for (const collectionId of collectionIds) {
+    if (!validCollectionIds.has(collectionId)) return errorResponse('Invalid collection', 400);
+  }
+
+  // A member without accessAll may only share into collections they are
+  // explicitly assigned to. accessAll members can use any org collection.
+  if (!membership.accessAll) {
+    const access = await storage.listAccessForMembership(membership.id);
+    const allowedCollectionIds = new Set(access.map((a) => a.collectionId));
+    for (const collectionId of collectionIds) {
+      if (!allowedCollectionIds.has(collectionId)) return errorResponse('Forbidden', 403);
+    }
+  }
+
+  const existing = await storage.getCipherForUser(id, userId);
+  if (!existing) return errorResponse('Cipher not found', 404);
+
+  const now = new Date().toISOString();
+  const newKey = readCipherProp<string | null>(cipherData, ['key', 'Key']);
+  if (newKey.present && !shouldAcceptCipherKey(newKey.value)) {
+    return errorResponse('Cipher key encryption is not supported by this server. Resync the client and try again.', 400);
+  }
+
+  // Opaque passthrough of the re-encrypted cipher, overriding server-controlled fields.
+  const cipher: Cipher = {
+    ...existing,
+    ...cipherData,
+    id,
+    userId,
+    type: Number(cipherData.type) || existing.type,
+    createdAt: existing.createdAt,
+    updatedAt: now,
+    deletedAt: existing.deletedAt,
+  };
+  cipher.key = normalizeCipherKeyForStorage(newKey.present ? newKey.value : cipher.key);
+  normalizeCipherForStorage(cipher);
+  const compatibilityError = validateCipherEncryptedFieldsForCompatibility(cipher);
+  if (compatibilityError) return errorResponse(compatibilityError, 400);
+
+  await storage.saveCipher(cipher);
+  await storage.setCipherOrganization(id, userId, organizationId, now);
+  await storage.setCipherCollections(id, collectionIds);
+  (cipher as any).organizationId = organizationId;
+  (cipher as any).collectionIds = Array.from(new Set(collectionIds));
+
+  const revisionDate = await storage.updateRevisionDate(userId);
+  notifyVaultSyncForRequest(request, env, userId, revisionDate);
+
+  await writeAuditEvent(storage, {
+    actorUserId: userId,
+    action: 'cipher.share',
+    category: 'data',
+    level: 'info',
+    targetType: 'cipher',
+    targetId: id,
+    metadata: { organizationId, collectionIds, ...auditRequestMetadata(request) },
+  });
+
+  // Bump other confirmed members' revision dates so the shared cipher propagates
+  // promptly on their next sync instead of waiting for the sync cache to expire.
+  try {
+    const orgMembers = await storage.listMembershipsForOrg(organizationId);
+    for (const member of orgMembers) {
+      if (member.status !== 2 || member.userId === userId) continue;
+      await storage.updateRevisionDate(member.userId);
+    }
+  } catch {
+    // Best-effort propagation; the 30s sync cache TTL still bounds staleness.
+  }
+
+  const responseOptions = cipherResponseOptionsForRequest(request);
+  return jsonResponse(cipherToResponse(cipher, [], responseOptions), 200);
 }

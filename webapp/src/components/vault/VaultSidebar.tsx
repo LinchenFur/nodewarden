@@ -4,6 +4,8 @@ import {
   Archive,
   ArrowUpDown,
   BookUser,
+  Building2,
+  Settings,
   Check,
   ChevronDown,
   ChevronRight,
@@ -30,9 +32,12 @@ import type { Folder } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import { buildFolderTree, flattenFolderTree } from '@/lib/folder-tree';
 import { getFolderSortOptions, type SidebarFilter, type VaultSortMode } from '@/components/vault/vault-page-helpers';
+import type { OrgProfile, OrgCollection } from '@/lib/types';
 
 interface VaultSidebarProps {
   folders: Folder[];
+  organizations: OrgProfile[];
+  collections: OrgCollection[];
   sidebarFilter: SidebarFilter;
   busy: boolean;
   isMobileLayout: boolean;
@@ -151,6 +156,9 @@ export default function VaultSidebar(props: VaultSidebarProps) {
         </button>
         <button type="button" className={`tree-btn ${props.sidebarFilter.kind === 'duplicates' ? 'active' : ''}`} onClick={() => props.onChangeFilter({ kind: 'duplicates' })}>
           <Copy size={14} className="tree-icon" /> <span className="tree-label">{t('txt_duplicates')}</span>
+        </button>
+        <button type="button" className="tree-btn" onClick={() => window.dispatchEvent(new Event('nodewarden:new-organization'))}>
+          <Building2 size={14} className="tree-icon" /> <span className="tree-label">{t('txt_new_organization') || 'New organization'}</span>
         </button>
       </div>
 
@@ -303,6 +311,38 @@ export default function VaultSidebar(props: VaultSidebarProps) {
           </div>
         ))}
       </div>
+      {props.organizations.length > 0 && (
+        <div className="sidebar-block">
+          <div className="sidebar-title">{t("txt_organizations") || "Organizations"}</div>
+          {props.organizations.map((org) => (
+            <div key={org.id}>
+              <button
+                type="button"
+                className={`tree-btn ${props.sidebarFilter.kind === "organization" && props.sidebarFilter.organizationId === org.id ? "active" : ""}`}
+                onClick={() => props.onChangeFilter({ kind: "organization", organizationId: org.id })}
+              >
+                <Building2 size={14} className="tree-icon" />
+                <span className="tree-label" title={org.name}>{org.name}</span>
+              </button>
+              <button type="button" className="folder-delete-btn folder-edit-btn" title={t('txt_manage_organization') || 'Manage'} onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.dispatchEvent(new CustomEvent('nodewarden:manage-organization', { detail: { organizationId: org.id } })); }}>
+                <Settings size={12} />
+              </button>
+              {props.collections.filter((col) => col.organizationId === org.id).map((col) => (
+                <button
+                  key={col.id}
+                  type="button"
+                  className={`tree-btn ${props.sidebarFilter.kind === "collection" && props.sidebarFilter.collectionId === col.id ? "active" : ""}`}
+                  style={{ paddingLeft: "28px" }}
+                  onClick={() => props.onChangeFilter({ kind: "collection", collectionId: col.id })}
+                >
+                  <FolderIcon size={13} className="tree-icon" />
+                  <span className="tree-label" title={col.decName || col.name}>{col.decName || col.name}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </aside>
   );
 }

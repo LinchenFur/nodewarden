@@ -72,6 +72,27 @@
   @apply flex flex-col items-center gap-1;
 }
 
+.dialog-hero-icon {
+  @apply mx-auto mb-1 inline-flex h-12 w-12 items-center justify-center rounded-2xl;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 16%, var(--panel)), color-mix(in srgb, var(--primary) 8%, var(--panel)));
+  color: var(--primary);
+  box-shadow: 0 10px 26px color-mix(in srgb, var(--primary) 16%, transparent), 0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent) inset;
+}
+
+.dialog-subtitle {
+  @apply mt-0.5 text-sm font-normal;
+  color: var(--muted);
+  line-height: var(--leading-snug);
+}
+
+.form-error {
+  @apply mt-3 mb-0 rounded-xl px-3.5 py-2.5 text-left text-sm font-semibold;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+  color: var(--danger);
+}
+
+
 .dialog-message {
   @apply mb-2.5;
   color: #475467;

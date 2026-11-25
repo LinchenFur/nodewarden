@@ -28,6 +28,77 @@
   @apply h-8 shrink-0 px-3 text-sm;
 }
 
+.public-send-login-row {
+  @apply flex items-center justify-between gap-3 py-2;
+  border-top: 1px solid var(--line-soft);
+}
+
+.public-send-login-row span {
+  @apply shrink-0 text-sm;
+  color: var(--muted);
+}
+
+.public-send-login-value {
+  @apply min-w-0 flex-1 break-all text-sm;
+  text-align: right;
+}
+
+.public-send-password {
+  font-family: var(--font-mono);
+}
+
+.public-send-totp {
+  @apply flex items-center gap-2;
+}
+
+.public-send-totp-code {
+  @apply text-lg font-bold tracking-widest;
+  font-family: var(--font-mono);
+  color: var(--primary);
+}
+
+.public-send-totp-code.is-low {
+  color: var(--danger);
+}
+
+.public-send-totp-copy {
+  @apply h-8 shrink-0 px-3 text-sm;
+}
+
+/* Countdown ring: number centered inside an SVG progress circle that empties
+   as time runs out and turns red in the last 10 seconds. */
+.public-send-totp-ring {
+  @apply relative inline-flex shrink-0 items-center justify-center;
+  width: 32px;
+  height: 32px;
+}
+
+.public-send-totp-ring-track {
+  stroke: var(--line);
+}
+
+.public-send-totp-ring-progress {
+  stroke: var(--primary);
+  transition: stroke-dashoffset 1s linear, stroke 0.3s ease;
+}
+
+.public-send-totp-ring-progress.no-transition {
+  transition: none;
+}
+
+.public-send-totp-ring.is-low .public-send-totp-ring-progress {
+  stroke: var(--danger);
+}
+
+.public-send-totp-ring-num {
+  @apply absolute text-xs font-bold tabular-nums;
+  color: var(--muted);
+}
+
+.public-send-totp-ring.is-low .public-send-totp-ring-num {
+  color: var(--danger);
+}
+
 .not-found-page {
   @apply relative grid min-h-full place-items-center overflow-hidden p-6 text-center;
   background: var(--surface);

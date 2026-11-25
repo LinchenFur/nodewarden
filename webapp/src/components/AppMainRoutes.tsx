@@ -7,6 +7,7 @@ import LoadingState from '@/components/LoadingState';
 import type { AdminBackupImportResponse, AdminBackupRunResponse, AdminBackupSettings, RemoteBackupBrowserResponse } from '@/lib/api/backup';
 import type { AuditLogFilters } from '@/lib/api/admin';
 import type { CiphersImportPayload } from '@/lib/api/vault';
+import type { OrgProfile, OrgCollection } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import type { AccountPasskeyCredential, AdminInvite, AdminUser, AuditLogListResult, AuditLogSettings, AuthRequest, AuthorizedDevice, Cipher, CustomEquivalentDomain, DomainRules, Folder as VaultFolder, Profile, Send, SendDraft, SessionState, TwoFactorPasskeySettings, VaultDraft, YubiKeyOtpSettings } from '@/lib/types';
 import type { ExportRequest } from '@/lib/export-formats';
@@ -47,6 +48,8 @@ export interface AppMainRoutesProps {
   settingsAccountRoute: string;
   decryptedCiphers: Cipher[];
   decryptedFolders: VaultFolder[];
+  decryptedOrganizations: OrgProfile[];
+  decryptedCollections: OrgCollection[];
   decryptedSends: Send[];
   vaultError: string;
   ciphersLoading: boolean;
@@ -256,6 +259,8 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
           <VaultPage
             ciphers={props.decryptedCiphers}
             folders={props.decryptedFolders}
+            organizations={props.decryptedOrganizations}
+            collections={props.decryptedCollections}
             loading={props.ciphersLoading || props.foldersLoading}
             error={props.vaultError}
             emailForReprompt={props.profile?.email || props.session?.email || ''}

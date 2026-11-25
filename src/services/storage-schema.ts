@@ -171,6 +171,55 @@ const SCHEMA_STATEMENTS: readonly string[] = [
 
   'CREATE TABLE IF NOT EXISTS used_attachment_download_tokens (' +
   'jti TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)',
+
+  // --- Organizations / Collections (MVP) ---
+  // An organization owns an RSA keypair. The organization symmetric key is wrapped
+  // per-member with the member's public key (stored in org_memberships.key).
+  'CREATE TABLE IF NOT EXISTS organizations (' +
+  'id TEXT PRIMARY KEY, name TEXT NOT NULL, billing_email TEXT, ' +
+  'public_key TEXT NOT NULL, private_key TEXT NOT NULL, ' +
+  'created_at TEXT NOT NULL, updated_at TEXT NOT NULL)',
+
+  // Membership links a user to an organization with a role and a status.
+  // status: 0 = invited, 1 = accepted, 2 = confirmed (key granted).
+  // key: the organization symmetric key wrapped with the member's public key.
+  'CREATE TABLE IF NOT EXISTS org_memberships (' +
+  'id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, user_id TEXT NOT NULL, ' +
+  "role TEXT NOT NULL DEFAULT 'user', status INTEGER NOT NULL DEFAULT 0, " +
+  'key TEXT, access_all INTEGER NOT NULL DEFAULT 0, ' +
+  'created_at TEXT NOT NULL, updated_at TEXT NOT NULL, ' +
+  'FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE, ' +
+  'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_org_memberships_org_user ON org_memberships(organization_id, user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_org_memberships_user ON org_memberships(user_id)',
+
+  // A collection groups shared ciphers. Its key is wrapped with the organization key.
+  'CREATE TABLE IF NOT EXISTS collections (' +
+  'id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, name TEXT NOT NULL, ' +
+  'external_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, ' +
+  'FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE)',
+  'CREATE INDEX IF NOT EXISTS idx_collections_org ON collections(organization_id)',
+
+  // Per-member access to a collection.
+  'CREATE TABLE IF NOT EXISTS collection_users (' +
+  'collection_id TEXT NOT NULL, membership_id TEXT NOT NULL, ' +
+  'read_only INTEGER NOT NULL DEFAULT 0, hide_passwords INTEGER NOT NULL DEFAULT 0, manage INTEGER NOT NULL DEFAULT 0, ' +
+  'PRIMARY KEY (collection_id, membership_id), ' +
+  'FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE, ' +
+  'FOREIGN KEY (membership_id) REFERENCES org_memberships(id) ON DELETE CASCADE)',
+  'CREATE INDEX IF NOT EXISTS idx_collection_users_membership ON collection_users(membership_id)',
+
+  // Associates an organization-owned cipher with one or more collections.
+  'CREATE TABLE IF NOT EXISTS cipher_collections (' +
+  'cipher_id TEXT NOT NULL, collection_id TEXT NOT NULL, ' +
+  'PRIMARY KEY (cipher_id, collection_id), ' +
+  'FOREIGN KEY (cipher_id) REFERENCES ciphers(id) ON DELETE CASCADE, ' +
+  'FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE)',
+  'CREATE INDEX IF NOT EXISTS idx_cipher_collections_collection ON cipher_collections(collection_id)',
+
+  // Organization ownership for ciphers. Null = personal vault item.
+  'ALTER TABLE ciphers ADD COLUMN organization_id TEXT',
+  'CREATE INDEX IF NOT EXISTS idx_ciphers_organization ON ciphers(organization_id)',
 ];
 
 async function executeSchemaStatement(db: D1Database, statement: string): Promise<void> {

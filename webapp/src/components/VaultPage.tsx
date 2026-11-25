@@ -34,12 +34,14 @@ import {
 import { calcTotpNow, type TotpCodeResult } from '@/lib/crypto';
 import { computeSshFingerprint, generateDefaultSshKeyMaterial } from '@/lib/ssh';
 import { ChevronLeft } from 'lucide-preact';
-import type { Cipher, CustomFieldType, Folder, VaultDraft, VaultDraftField } from '@/lib/types';
+import type { Cipher, CustomFieldType, Folder, VaultDraft, VaultDraftField, OrgProfile, OrgCollection } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
 interface VaultPageProps {
   ciphers: Cipher[];
   folders: Folder[];
+  organizations: OrgProfile[];
+  collections: OrgCollection[];
   loading: boolean;
   error: string;
   emailForReprompt: string;
@@ -416,6 +418,13 @@ export default function VaultPage(props: VaultPageProps) {
           } else if (cipher.folderId !== sidebarFilter.folderId) {
             return false;
           }
+        }
+        if (sidebarFilter.kind === 'organization') {
+          if ((cipher as any).organizationId !== sidebarFilter.organizationId) return false;
+        }
+        if (sidebarFilter.kind === 'collection') {
+          const ids = Array.isArray((cipher as any).collectionIds) ? (cipher as any).collectionIds : [];
+          if (!ids.includes(sidebarFilter.collectionId)) return false;
         }
       }
       if (!searchQuery) return true;
@@ -1218,6 +1227,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
         )}
         <VaultSidebar
           folders={props.folders}
+          organizations={props.organizations}
+          collections={props.collections}
           sidebarFilter={sidebarFilter}
           busy={busy}
           isMobileLayout={isMobileLayout}
